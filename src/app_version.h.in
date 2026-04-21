@@ -1,0 +1,3 @@
+#pragma once
+
+#define SPECSVIEWER_VERSION "@PROJECT_VERSION@"

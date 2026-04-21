@@ -1,0 +1,1 @@
+/* hyperlink helper removed */

@@ -1,0 +1,19 @@
+# Игнорировать CMake build
+build/
+build*/        
+
+# Игнорировать бинарники
+*.exe
+*.dll
+!WinRing0x64.dll
+*.obj
+*.o
+*.pdb
+*.lib
+*.a
+
+# Игнорировать временные файлы IDE
+.vscode/
+.idea/
+.cache/
+*.log
