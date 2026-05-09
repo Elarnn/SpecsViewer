@@ -2,7 +2,6 @@
 setlocal enabledelayedexpansion
 set BUILD_DIR=build
 set EXE_NAME=specsviewer.exe
-set DLL_PATH=libs\GLFW\lib-mingw-w64\glfw3.dll
 
 rem --- гарантированно убить старый процесс, если висит
 taskkill /f /im %EXE_NAME% >nul 2>&1
@@ -17,14 +16,6 @@ cmake -S . -B %BUILD_DIR% -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAK
 
 echo === Building (clean-first) ===
 cmake --build %BUILD_DIR% --clean-first -- -j
-
-echo === Copying DLL ===
-if exist "%~dp0%DLL_PATH%" (
-    if not exist "%BUILD_DIR%\bin" mkdir "%BUILD_DIR%\bin"
-    copy "%~dp0%DLL_PATH%" "%BUILD_DIR%\bin\" >nul
-) else (
-    echo ⚠️ DLL not found: %~dp0%DLL_PATH%
-)
 
 echo === Running program ===
 echo Will run: "%~dp0%BUILD_DIR%\bin\%EXE_NAME%"

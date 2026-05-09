@@ -77,15 +77,13 @@ target_include_directories(specsviewer PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ui
 )
 
-target_link_directories(specsviewer PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/GLFW/lib-mingw-w64
-)
-
 target_link_libraries(specsviewer PRIVATE
-    glfw3
+    ${CMAKE_SOURCE_DIR}/libs/GLFW/lib-mingw-w64/libglfw3.a
     opengl32
     gdi32
+    user32
     kernel32
+    shell32
 )
 
 set_target_properties(specsviewer PROPERTIES
@@ -124,12 +122,6 @@ if(MINGW)
         -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
     )
 endif()
-
-add_custom_command(TARGET specsviewer POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${CMAKE_SOURCE_DIR}/libs/GLFW/lib-mingw-w64/glfw3.dll"
-    $<TARGET_FILE_DIR:specsviewer>
-)
 
 add_custom_command(TARGET specsviewer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
