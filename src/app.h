@@ -45,6 +45,12 @@ struct AppState {
   volatile LONG scan_progress; // 0..1000 (проценты*10)
   CRITICAL_SECTION scan_cs;    // защита drv_snap + risk_* + hw + score
 
+  char title[64];
+
+  int   active_theme;       /* AppTheme — runtime selected theme */
+  int   theme_panel_open;   /* 1 = panel opening/open */
+  float theme_panel_anim;   /* 0.0 closed → 1.0 fully open */
+
   struct nk_font *font_main;
   struct nk_font *font_cyr;
   struct nk_font *font_subheader;
@@ -70,6 +76,7 @@ struct AppState {
   // ====== Updater ======
   UpdateState updater;
   int updater_asked;
+  int update_dont_ask;    /* 1 = skip popup on future launches (saved to config) */
 };
 
 int app_init(struct AppState *S, int w, int h, const char *title);

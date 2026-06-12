@@ -3,7 +3,7 @@
 #include <windows.h>
 
 #define BENCH_BASELINE_SCORE 1000.0
-#define BENCH_TEST_DURATION_SEC 15.0
+#define BENCH_TEST_DURATION_SEC 10.0
 
 enum BenchPhase {
   BENCH_PHASE_IDLE = 0,

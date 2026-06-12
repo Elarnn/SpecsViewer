@@ -38,9 +38,9 @@ static void bench_draw_compare_chart(struct nk_context *ctx, const char *title,
   bounds = nk_widget_bounds(ctx);
   canvas = nk_window_get_canvas(ctx);
 
-  struct nk_color bg = nk_rgb(42, 42, 44);
-  struct nk_color border = nk_rgb(82, 82, 86);
-  struct nk_color cpu_col = nk_rgb(57, 158, 255);
+  struct nk_color bg          = ctx->style.chart.background.data.color;
+  struct nk_color border      = ctx->style.chart.border_color;
+  struct nk_color cpu_col     = nk_rgb(57, 158, 255);
   struct nk_color baseline_col = nk_rgb(255, 175, 45);
 
   nk_fill_rect(canvas, bounds, 2.0f, bg);

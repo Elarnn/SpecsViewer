@@ -120,5 +120,6 @@ void ui_page_gpu(struct nk_context *ctx, const struct AppState *S) {
 
     nk_size used_percent = S->snap.gpu_rt.vram_load;
     nk_progress(ctx, &used_percent, 100, nk_false);
+    nk_group_end(ctx);
   }
 }
