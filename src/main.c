@@ -13,7 +13,7 @@ int main(void) {
   }
 
   const char *title = elevated ? "SpecsViewer (full-mode)" : "SpecsViewer (user-mode)";
-  if (!app_init(&S, 680, 560, title))
+  if (!app_init(&S, 760, 656, title))
     return -1;
 
   if (!elevated)

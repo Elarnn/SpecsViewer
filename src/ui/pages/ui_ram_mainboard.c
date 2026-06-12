@@ -8,7 +8,7 @@ void ui_page_ram(struct nk_context *ctx, const struct AppState *S) {
 
   struct nk_rect content = nk_window_get_content_region(ctx);
 
-  const float usage_h = 140.0f; // высота нижнего блока (фиксированная)
+  const float usage_h = 160.0f;
   const float gap_h = 6.0f;     // небольшой зазор между зонами
 
   float top_h = content.h - usage_h - gap_h;

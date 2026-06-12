@@ -78,9 +78,14 @@ static void render_markdown(struct nk_context *ctx, struct AppState *S,
 static void push_github_btn_style(struct nk_context *ctx,
                                   struct nk_style_button *out) {
   *out = ctx->style.button;
+  /* detect light background by window luminance */
+  struct nk_color win = ctx->style.window.background;
+  int is_light = ((int)win.r + (int)win.g + (int)win.b) > 380;
   ctx->style.button.normal = nk_style_item_color(nk_rgba(0, 0, 0, 0));
-  ctx->style.button.hover = nk_style_item_color(nk_rgba(255, 255, 255, 40));
-  ctx->style.button.active = nk_style_item_color(nk_rgba(255, 255, 255, 70));
+  ctx->style.button.hover  = nk_style_item_color(
+      is_light ? nk_rgba(0, 0, 0, 45) : nk_rgba(255, 255, 255, 40));
+  ctx->style.button.active = nk_style_item_color(
+      is_light ? nk_rgba(0, 0, 0, 75) : nk_rgba(255, 255, 255, 70));
   ctx->style.button.border_color = nk_rgba(0, 0, 0, 0);
   ctx->style.button.border = 0;
   ctx->style.button.padding = nk_vec2(0, 0);
@@ -193,22 +198,7 @@ void ui_page_about(struct nk_context *ctx, struct AppState *S) {
     int ustate = (int)S->updater.state;
     nk_layout_row_dynamic(ctx, 30, 1);
 
-    if (ustate == UPDATE_CHECKING) {
-      nk_label(ctx, "Checking for updates...", NK_TEXT_CENTERED);
-
-    } else if (ustate == UPDATE_DL_UPDATER) {
-      nk_label(ctx, "Downloading updater...", NK_TEXT_CENTERED);
-
-    } else if (ustate == UPDATE_DL_ERROR) {
-      char lbl[320];
-      snprintf(lbl, sizeof(lbl), "%.250s - Retry", S->updater.dl_error);
-      if (nk_button_label(ctx, lbl)) {
-        update_cleanup(&S->updater);
-        update_launch_updater(&S->updater);
-      }
-
-    } else if (ustate == UPDATE_AVAILABLE) {
-      /* Button for manual re-trigger */
+    if (ustate == UPDATE_AVAILABLE) {
       char lbl[80];
       snprintf(lbl, sizeof(lbl), "Version %s available - Click to update",
                S->updater.latest_ver);
@@ -220,33 +210,25 @@ void ui_page_about(struct nk_context *ctx, struct AppState *S) {
                         MB_YESNO | MB_ICONINFORMATION) == IDYES)
           update_launch_updater(&S->updater);
       }
-
-    } else if (ustate == UPDATE_LATEST) {
-      char lbl[80];
-      snprintf(lbl, sizeof(lbl), "Up to date (%s) - Check again",
-               S->updater.latest_ver);
+    } else if (ustate == UPDATE_DL_UPDATER) {
+      nk_label(ctx, "Downloading updater...", NK_TEXT_CENTERED);
+    } else if (ustate == UPDATE_DL_ERROR) {
+      char lbl[320];
+      snprintf(lbl, sizeof(lbl), "%.250s - Retry", S->updater.dl_error);
       if (nk_button_label(ctx, lbl)) {
         update_cleanup(&S->updater);
-        InterlockedExchange(&S->updater.state, UPDATE_IDLE);
-        S->updater_asked = 0;
-        update_check_start(&S->updater);
+        update_launch_updater(&S->updater);
       }
-
-    } else if (ustate == UPDATE_ERROR) {
-      if (nk_button_label(ctx, "Failed to check for updates - Retry")) {
-        update_cleanup(&S->updater);
-        InterlockedExchange(&S->updater.state, UPDATE_IDLE);
-        S->updater_asked = 0;
-        update_check_start(&S->updater);
-      }
-
-    } else { /* IDLE */
+    } else {
       if (nk_button_label(ctx, "Check for Updates")) {
-        S->updater_asked = 0;
-        update_check_start(&S->updater);
+        MessageBoxA(NULL,
+                    "You are running the latest version of SpecsViewer.\n"
+                    "No updates are available at this time.",
+                    "Up to Date", MB_OK | MB_ICONINFORMATION);
       }
     }
 
     nk_group_end(ctx);
   }
 }
+

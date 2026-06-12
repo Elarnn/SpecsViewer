@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SpecsViewer VERSION 1.0.0 LANGUAGES C)
+project(SpecsViewer VERSION 1.1.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -77,13 +77,15 @@ target_include_directories(specsviewer PRIVATE
     ${CMAKE_SOURCE_DIR}/src/ui
 )
 
+target_link_directories(specsviewer PRIVATE
+    ${CMAKE_SOURCE_DIR}/libs/GLFW/lib-mingw-w64
+)
+
 target_link_libraries(specsviewer PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/GLFW/lib-mingw-w64/libglfw3.a
+    glfw3
     opengl32
     gdi32
-    user32
     kernel32
-    shell32
 )
 
 set_target_properties(specsviewer PROPERTIES
@@ -111,6 +113,7 @@ target_link_libraries(specsviewer PRIVATE
     winhttp
     windowscodecs
     comdlg32
+    dwmapi
 )
 
 
@@ -122,6 +125,12 @@ if(MINGW)
         -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
     )
 endif()
+
+add_custom_command(TARGET specsviewer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/libs/GLFW/lib-mingw-w64/glfw3.dll"
+    $<TARGET_FILE_DIR:specsviewer>
+)
 
 add_custom_command(TARGET specsviewer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different

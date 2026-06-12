@@ -36,16 +36,44 @@ struct RtGraph {
   double last_update;
 };
 
+static struct RtGraph cpu_graph      = {0};
+static struct RtGraph cpu_temp_graph = {0};
+static struct RtGraph ram_graph      = {0};
+static struct RtGraph gpu_graph      = {0};
+static struct RtGraph gpu_temp_graph = {0};
+
+void sensors_update_graphs(const struct AppState *S) {
+  float cpu_load = (float)S->snap.cpu_rt.load;
+  rt_graph_clamp_0_100(&cpu_load);
+  rt_graph_update_slow(&cpu_graph, cpu_load, RT_GRAPH_UPDATE_INTERVAL);
+
+  float cpu_temp = (float)S->snap.cpu_rt.cpu_temp;
+  if (cpu_temp < 20.0f) cpu_temp = 20.0f;
+  if (cpu_temp > 110.0f) cpu_temp = 110.0f;
+  rt_graph_update_slow(&cpu_temp_graph, cpu_temp, RT_GRAPH_UPDATE_INTERVAL);
+
+  float gpu_load = (float)S->snap.gpu_rt.vram_load;
+  rt_graph_clamp_0_100(&gpu_load);
+  rt_graph_update_slow(&gpu_graph, gpu_load, RT_GRAPH_UPDATE_INTERVAL);
+
+  float gpu_temp = (float)S->snap.gpu_rt.clock_temp;
+  if (gpu_temp < 20.0f) gpu_temp = 20.0f;
+  if (gpu_temp > 110.0f) gpu_temp = 110.0f;
+  rt_graph_update_slow(&gpu_temp_graph, gpu_temp, RT_GRAPH_UPDATE_INTERVAL);
+
+  float ram_pct = 0.0f;
+  if (S->snap.data.ram.total_mb > 0) {
+    ram_pct = (float)((double)S->snap.ram_rt.used_mb * 100.0 /
+                      (double)S->snap.data.ram.total_mb);
+  }
+  rt_graph_clamp_0_100(&ram_pct);
+  rt_graph_update_slow(&ram_graph, ram_pct, RT_GRAPH_UPDATE_INTERVAL);
+}
+
 void ui_page_sensors(struct nk_context *ctx, const struct AppState *S) {
   char buf[128];
 
-  static struct RtGraph cpu_graph      = {0};
-  static struct RtGraph cpu_temp_graph = {0};
-  static struct RtGraph ram_graph      = {0};
-  static struct RtGraph gpu_graph      = {0};
-  static struct RtGraph gpu_temp_graph = {0};
-
-  nk_layout_row_dynamic(ctx, 500, 1);
+  nk_layout_row_dynamic(ctx, nk_window_get_content_region(ctx).h, 1);
   if (nk_group_begin(ctx, "Wrapper", 0)) {
 
     // ------------------------------------------------------------------ CPU --
@@ -55,7 +83,6 @@ void ui_page_sensors(struct nk_context *ctx, const struct AppState *S) {
 
       float cpu_load = (float)S->snap.cpu_rt.load;
       rt_graph_clamp_0_100(&cpu_load);
-      rt_graph_update_slow(&cpu_graph, cpu_load, RT_GRAPH_UPDATE_INTERVAL);
 
       ui_space(ctx);
 
@@ -78,7 +105,6 @@ void ui_page_sensors(struct nk_context *ctx, const struct AppState *S) {
       float cpu_temp = (float)S->snap.cpu_rt.cpu_temp;
       if (cpu_temp < 20.0f) cpu_temp = 20.0f;
       if (cpu_temp > 110.0f) cpu_temp = 110.0f;
-      rt_graph_update_slow(&cpu_temp_graph, cpu_temp, RT_GRAPH_UPDATE_INTERVAL);
 
       nk_layout_row_template_begin(ctx, 140);
       nk_layout_row_template_push_static(ctx, 100);
@@ -111,7 +137,6 @@ void ui_page_sensors(struct nk_context *ctx, const struct AppState *S) {
       // --- Core load graph ---
       float gpu_load = (float)S->snap.gpu_rt.vram_load;
       rt_graph_clamp_0_100(&gpu_load);
-      rt_graph_update_slow(&gpu_graph, gpu_load, RT_GRAPH_UPDATE_INTERVAL);
 
       nk_layout_row_template_begin(ctx, 140);
       nk_layout_row_template_push_static(ctx, 100);
@@ -132,7 +157,6 @@ void ui_page_sensors(struct nk_context *ctx, const struct AppState *S) {
       float gpu_temp = (float)S->snap.gpu_rt.clock_temp;
       if (gpu_temp < 20.0f)  gpu_temp = 20.0f;
       if (gpu_temp > 110.0f) gpu_temp = 110.0f;
-      rt_graph_update_slow(&gpu_temp_graph, gpu_temp, RT_GRAPH_UPDATE_INTERVAL);
 
       nk_layout_row_template_begin(ctx, 140);
       nk_layout_row_template_push_static(ctx, 100);
@@ -178,8 +202,6 @@ void ui_page_sensors(struct nk_context *ctx, const struct AppState *S) {
       }
 
       rt_graph_clamp_0_100(&ram_pct);
-      rt_graph_update_slow(&ram_graph, ram_pct, RT_GRAPH_UPDATE_INTERVAL);
-
       snprintf(buf, sizeof(buf), "%.1f %%", ram_pct);
 
       ui_space(ctx);

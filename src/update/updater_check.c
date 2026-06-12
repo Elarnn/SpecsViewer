@@ -438,13 +438,6 @@ void update_launch_updater(UpdateState *us) {
     strcpy(slash + 1, "updater\\updater.exe");
 
     if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
-        char msg[MAX_PATH + 128];
-        snprintf(msg, sizeof(msg),
-            "Updater not found:\n%s\n\nDownload the latest updater now?", path);
-        if (MessageBoxA(NULL, msg, "Updater Not Found",
-                        MB_OKCANCEL | MB_ICONQUESTION) != IDOK)
-            return;
-
         /* Build download context */
         DlCtx *ctx = (DlCtx *)calloc(1, sizeof(DlCtx));
         if (!ctx) return;
