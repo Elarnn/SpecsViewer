@@ -437,35 +437,32 @@ void update_launch_updater(UpdateState *us) {
     if (!slash) return;
     strcpy(slash + 1, "updater\\updater.exe");
 
-    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
-        /* Build download context */
-        DlCtx *ctx = (DlCtx *)calloc(1, sizeof(DlCtx));
-        if (!ctx) return;
-        ctx->us = us;
+    /* Always delete cached updater so a fixed version is fetched on every run */
+    DeleteFileA(path);
 
-        char dir[MAX_PATH];
-        GetModuleFileNameA(NULL, dir, sizeof(dir));
-        char *s = strrchr(dir, '\\');
-        if (s) strcpy(s + 1, "updater");
-        strncpy(ctx->updater_dir, dir,  sizeof(ctx->updater_dir) - 1);
-        strncpy(ctx->exe_path,    path, sizeof(ctx->exe_path)    - 1);
+    DlCtx *ctx = (DlCtx *)calloc(1, sizeof(DlCtx));
+    if (!ctx) return;
+    ctx->us = us;
 
-        if (us->thread) {
-            WaitForSingleObject(us->thread, 0);
-            CloseHandle(us->thread);
-            us->thread = NULL;
-        }
+    char dir[MAX_PATH];
+    GetModuleFileNameA(NULL, dir, sizeof(dir));
+    char *s = strrchr(dir, '\\');
+    if (s) strcpy(s + 1, "updater");
+    strncpy(ctx->updater_dir, dir,  sizeof(ctx->updater_dir) - 1);
+    strncpy(ctx->exe_path,    path, sizeof(ctx->exe_path)    - 1);
 
-        InterlockedExchange(&us->state, UPDATE_DL_UPDATER);
-        us->thread = CreateThread(NULL, 0, download_updater_worker, ctx, 0, NULL);
-        if (!us->thread) {
-            strncpy(us->dl_error, "Failed to start download thread",
-                    sizeof(us->dl_error) - 1);
-            InterlockedExchange(&us->state, UPDATE_DL_ERROR);
-            free(ctx);
-        }
-        return;
+    if (us->thread) {
+        WaitForSingleObject(us->thread, 0);
+        CloseHandle(us->thread);
+        us->thread = NULL;
     }
 
-    ShellExecuteA(NULL, "open", path, NULL, NULL, SW_SHOWNORMAL);
+    InterlockedExchange(&us->state, UPDATE_DL_UPDATER);
+    us->thread = CreateThread(NULL, 0, download_updater_worker, ctx, 0, NULL);
+    if (!us->thread) {
+        strncpy(us->dl_error, "Failed to start download thread",
+                sizeof(us->dl_error) - 1);
+        InterlockedExchange(&us->state, UPDATE_DL_ERROR);
+        free(ctx);
+    }
 }
