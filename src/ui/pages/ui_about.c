@@ -13,11 +13,24 @@
 #define OPEN_URL(url)                                                          \
   ShellExecuteA(NULL, "open", (url), NULL, NULL, SW_SHOWNORMAL)
 
-static int wrap_lines(struct nk_user_font *f, const char *txt, float avail_w) {
-    if (avail_w <= 0.0f || !txt || !*txt) return 1;
-    float tw = f->width(f->userdata, f->height, txt, (int)strlen(txt));
-    int n = (int)(tw / avail_w) + 1;
-    return n < 1 ? 1 : n;
+/* Strip **bold**, *italic* markers and replace out-of-range UTF-8 sequences */
+static void strip_inline(const char *src, char *dst, int dst_sz) {
+    int i = 0;
+    const char *p = src;
+    while (*p && i < dst_sz - 1) {
+        /* ** bold marker */
+        if (p[0] == '*' && p[1] == '*') { p += 2; continue; }
+        /* em dash U+2014 (0xE2 0x80 0x94) → - */
+        if ((unsigned char)p[0] == 0xE2 &&
+            (unsigned char)p[1] == 0x80 &&
+            (unsigned char)p[2] == 0x94) { dst[i++] = '-'; p += 3; continue; }
+        /* en dash U+2013 (0xE2 0x80 0x93) → - */
+        if ((unsigned char)p[0] == 0xE2 &&
+            (unsigned char)p[1] == 0x80 &&
+            (unsigned char)p[2] == 0x93) { dst[i++] = '-'; p += 3; continue; }
+        dst[i++] = *p++;
+    }
+    dst[i] = '\0';
 }
 
 static void render_markdown(struct nk_context *ctx, struct AppState *S,
@@ -25,51 +38,46 @@ static void render_markdown(struct nk_context *ctx, struct AppState *S,
     char line[512];
     const char *p = text;
 
-    float avail_w = nk_window_get_content_region(ctx).w
-                    - ctx->style.window.scrollbar_size.x
-                    - 2.0f * ctx->style.window.padding.x;
-    if (avail_w < 40.0f) avail_w = 40.0f;
-
     while (*p) {
         const char *end = strchr(p, '\n');
         int len = end ? (int)(end - p) : (int)strlen(p);
         if (len > (int)sizeof(line) - 1) len = (int)sizeof(line) - 1;
         memcpy(line, p, len);
+        if (len > 0 && line[len - 1] == '\r') len--;
         line[len] = '\0';
-        p = end ? end + 1 : p + len;
+        p = end ? end + 1 : p + strlen(p);
 
         if (len == 0) {
-            nk_layout_row_dynamic(ctx, 6, 1);
+            nk_layout_row_dynamic(ctx, 8, 1);
             nk_spacing(ctx, 1);
+        } else if (strncmp(line, "### ", 4) == 0) {
+            nk_layout_row_dynamic(ctx, 26, 1);
+            nk_style_push_font(ctx, &S->font_subheader->handle);
+            nk_label(ctx, line + 4, NK_TEXT_LEFT);
+            nk_style_pop_font(ctx);
         } else if (strncmp(line, "## ", 3) == 0) {
-            struct nk_user_font *f = &S->font_subheader->handle;
-            int n = wrap_lines(f, line + 3, avail_w);
-            nk_layout_row_dynamic(ctx, 28.0f * n, 1);
-            nk_style_push_font(ctx, f);
-            nk_label_wrap(ctx, line + 3);
+            nk_layout_row_dynamic(ctx, 30, 1);
+            nk_style_push_font(ctx, &S->font_subheader->handle);
+            nk_label(ctx, line + 3, NK_TEXT_LEFT);
             nk_style_pop_font(ctx);
         } else if (strncmp(line, "# ", 2) == 0) {
-            struct nk_user_font *f = &S->font_header->handle;
-            int n = wrap_lines(f, line + 2, avail_w);
-            nk_layout_row_dynamic(ctx, 32.0f * n, 1);
-            nk_style_push_font(ctx, f);
-            nk_label_wrap(ctx, line + 2);
+            nk_layout_row_dynamic(ctx, 34, 1);
+            nk_style_push_font(ctx, &S->font_header->handle);
+            nk_label(ctx, line + 2, NK_TEXT_LEFT);
             nk_style_pop_font(ctx);
-        } else if ((strncmp(line, "- ", 2) == 0 || strncmp(line, "* ", 2) == 0)) {
-            char bullet[516];
-            snprintf(bullet, sizeof(bullet), "  \xE2\x80\xA2 %s", line + 2);
-            struct nk_user_font *f = &S->font_cyr->handle;
-            int n = wrap_lines(f, bullet, avail_w);
-            nk_layout_row_dynamic(ctx, 20.0f * n, 1);
-            nk_style_push_font(ctx, f);
-            nk_label_wrap(ctx, bullet);
+        } else if (strncmp(line, "- ", 2) == 0 || strncmp(line, "* ", 2) == 0) {
+            char cleaned[512]; strip_inline(line + 2, cleaned, sizeof(cleaned));
+            char bullet[520];
+            snprintf(bullet, sizeof(bullet), "  \xC2\xB7 %s", cleaned);
+            nk_layout_row_dynamic(ctx, 24, 1);
+            nk_style_push_font(ctx, &S->font_cyr->handle);
+            nk_label(ctx, bullet, NK_TEXT_LEFT);
             nk_style_pop_font(ctx);
         } else {
-            struct nk_user_font *f = &S->font_cyr->handle;
-            int n = wrap_lines(f, line, avail_w);
-            nk_layout_row_dynamic(ctx, 20.0f * n, 1);
-            nk_style_push_font(ctx, f);
-            nk_label_wrap(ctx, line);
+            char cleaned[512]; strip_inline(line, cleaned, sizeof(cleaned));
+            nk_layout_row_dynamic(ctx, 24, 1);
+            nk_style_push_font(ctx, &S->font_cyr->handle);
+            nk_label(ctx, cleaned, NK_TEXT_LEFT);
             nk_style_pop_font(ctx);
         }
     }
