@@ -4,6 +4,7 @@
 #include "ui/nk_common.h"
 #include "config.h"
 #include "update/update_dialog.h"
+#include "net/bench_sync.h"
 #include <stdio.h>
 
 #define FAIL(MSG) \
@@ -18,6 +19,7 @@ int app_init(struct AppState *S, int w, int h, const char *title) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_RESIZABLE,  GLFW_FALSE);
     glfwWindowHint(GLFW_DECORATED,  GLFW_FALSE);
+    glfwWindowHint(GLFW_VISIBLE,    GLFW_FALSE);
 
     S->window = glfwCreateWindow(w, h, title, NULL, NULL);
     if (!S->window) {
@@ -61,13 +63,16 @@ int app_init(struct AppState *S, int w, int h, const char *title) {
     config_load(S); /* override theme and dont_ask from saved config */
 
     bench_init(&S->bench);
+    bench_sync_init(&S->bench_sync);
 
     /* Backend + updater */
     if (!backend_start(&S->backend))
         FAIL("backend_start failed");
 
     update_check_start(&S->updater);
+    bench_sync_fetch_refs(&S->bench_sync);
 
+    glfwShowWindow(S->window);
     return 1;
 }
 
@@ -113,6 +118,7 @@ void app_shutdown(struct AppState *S) {
     DeleteCriticalSection(&S->scan_cs);
 
     update_cleanup(&S->updater);
+    bench_sync_shutdown(&S->bench_sync);
     bench_shutdown(&S->bench);
     backend_stop(&S->backend);
 

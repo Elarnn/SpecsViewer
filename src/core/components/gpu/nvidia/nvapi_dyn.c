@@ -29,6 +29,10 @@ NvAPI_Status(__cdecl *pNvAPI_GPU_GetCurrentPCIEDownstreamWidth)(
     NvPhysicalGpuHandle, NvU32 *) = NULL;
 NvAPI_Status(__cdecl *pNvAPI_GPU_GetThermalSettings)(
     NvPhysicalGpuHandle, NvU32, NV_GPU_THERMAL_SETTINGS *) = NULL;
+NvAPI_Status(__cdecl *pNvAPI_GPU_GetArchInfo)(
+    NvPhysicalGpuHandle, NV_GPU_ARCH_INFO *) = NULL;
+NvAPI_Status(__cdecl *pNvAPI_SYS_GetDisplayDriverInfo)(
+    NV_DISPLAY_DRIVER_INFO *) = NULL;
 
 /* NVAPI interface IDs */
 #define ID_NvAPI_Initialize 0x0150E828u
@@ -42,6 +46,8 @@ NvAPI_Status(__cdecl *pNvAPI_GPU_GetThermalSettings)(
 #define ID_NvAPI_GPU_GetRamType 0x57F7CAACu
 #define ID_NvAPI_GPU_GetCurrentPCIEDownstreamWidth 0xD048C3B1u
 #define ID_NvAPI_GPU_GetThermalSettings 0xE3640A56u
+#define ID_NvAPI_GPU_GetArchInfo        0xD8265D24u
+#define ID_NvAPI_SYS_GetDisplayDriverInfo 0x721FACEBu
 
 int nvapi_dyn_load(void) {
   g_nvapi = LoadLibraryA("nvapi64.dll");
@@ -77,6 +83,10 @@ int nvapi_dyn_load(void) {
   pNvAPI_GPU_GetThermalSettings = (NvAPI_Status(__cdecl *)(
       NvPhysicalGpuHandle, NvU32,
       NV_GPU_THERMAL_SETTINGS *))qi(ID_NvAPI_GPU_GetThermalSettings);
+  pNvAPI_GPU_GetArchInfo = (NvAPI_Status(__cdecl *)(
+      NvPhysicalGpuHandle, NV_GPU_ARCH_INFO *))qi(ID_NvAPI_GPU_GetArchInfo);
+  pNvAPI_SYS_GetDisplayDriverInfo = (NvAPI_Status(__cdecl *)(
+      NV_DISPLAY_DRIVER_INFO *))qi(ID_NvAPI_SYS_GetDisplayDriverInfo);
 
   return pNvAPI_Initialize && pNvAPI_Unload && pNvAPI_EnumPhysicalGPUs &&
          pNvAPI_GPU_GetFullName && pNvAPI_GetErrorMessage &&

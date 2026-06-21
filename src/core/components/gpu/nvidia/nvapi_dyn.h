@@ -34,6 +34,8 @@ extern "C"
     extern NvAPI_Status(__cdecl *pNvAPI_GPU_GetRamType)(NvPhysicalGpuHandle, NvU32 *);
     extern NvAPI_Status(__cdecl *pNvAPI_GPU_GetCurrentPCIEDownstreamWidth)(NvPhysicalGpuHandle hPhysicalGpu, NvU32 *pWidth);
     extern NvAPI_Status (__cdecl *pNvAPI_GPU_GetThermalSettings)(NvPhysicalGpuHandle hPhysicalGpu, NvU32 sensorIndex, NV_GPU_THERMAL_SETTINGS *pThermalSettings);
+    extern NvAPI_Status (__cdecl *pNvAPI_GPU_GetArchInfo)(NvPhysicalGpuHandle hPhysicalGpu, NV_GPU_ARCH_INFO *pGpuArchInfo);
+    extern NvAPI_Status (__cdecl *pNvAPI_SYS_GetDisplayDriverInfo)(NV_DISPLAY_DRIVER_INFO *pDriverInfo);
 
 
 #ifdef __cplusplus

@@ -3,8 +3,8 @@
 
 void ui_topbar(struct nk_context *ctx, enum AppTab *active) {
   static const char *names[] = {
-      "CPU",     "RAM/Mboard", "GPU",  "Secure",
-      "Sensors", "Bench",      "About"}; // массив подписей кнопок
+      "CPU",     "RAM/Mboard", "GPU",
+      "Sensors", "Bench",      "Secure", "About"}; // массив подписей кнопок
 
   nk_layout_row_begin(ctx, NK_DYNAMIC, 24, 7);
   for (int i = 0; i < 7; ++i)

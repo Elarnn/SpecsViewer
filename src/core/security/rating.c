@@ -101,11 +101,7 @@ SecRating sec_rating_compute(const Snapshot *snap, int count_loldrivers,
   int p_lold = penalty_bucket(count_loldrivers, 22, 16, 10, 70);
   int p_ms = penalty_bucket(count_msblock, 18, 12, 8, 60);
 
-  // unsigned: MS слабее, 3rd-party сильнее
-  int p_uns_3p = penalty_bucket(unsigned_3p, 7, 5, 3, 40);
-  int p_uns_ms = penalty_bucket(unsigned_ms, 3, 2, 1, 20);
-
-  int penalty = p_lold + p_ms + p_uns_3p + p_uns_ms;
+  int penalty = p_lold + p_ms;
 
   // если MS DB не загрузилась — немного хуже, т.к. coverage ниже
   if (!ms_db_ready)

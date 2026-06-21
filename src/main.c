@@ -4,7 +4,7 @@
 #include "onstart/winring_check.h"
 
 int main(void) {
-  struct AppState S = {0};
+  static struct AppState S = {0};
 
   int elevated = app_is_elevated();
   if (elevated) {
@@ -16,7 +16,7 @@ int main(void) {
   if (!app_init(&S, 760, 656, title))
     return -1;
 
-  if (!elevated)
+  if (!elevated && !S.usermode_warn_dont_ask)
     S.usermode_warn_open = 1;
 
   while (!glfwWindowShouldClose(S.window))

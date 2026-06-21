@@ -25,7 +25,9 @@ void get_cpu_load(Snapshot *s);
 unsigned long long get_ram_total_mb(void);
 unsigned long long get_ram_used_mb(void);
 char *get_ram_type(void);
+char *get_ram_manufacturer(void);
 int get_ram_nominal_freq_mhz(void);
+const char *spd_get_dram_manufacturer(void);
 int get_ram_module_count(void);
 int get_ram_channel_count_smbios(void);
 int get_ram_channel_count_smbios_t17(void); /* SMBIOS Type 17 device locator */
@@ -51,6 +53,9 @@ int get_nvd_gpu_core_temp(int *out_temp_c);
 int get_nvd_gpu_mem_temp(int *out_temp_c);
 int get_nvd_gpu_current_core_mem_mhz(unsigned int *out_core_mhz, unsigned int *out_mem_mhz);
 int get_nvd_gpu_vram_snapshot(unsigned *out_used_mb, unsigned *out_total_mb, double *out_percent);
+int get_nvd_gpu_arch_info(char *arch, size_t arch_sz, char *die, size_t die_sz, char *process_node, size_t pn_sz);
+int get_nvd_gpu_vram_bus_bits(const char *die_name, unsigned int *out_bits);
+int get_nvd_gpu_driver_info(char *ver, size_t ver_sz, char *date, size_t date_sz);
 
 /* ===============
   MOTHERBOARD INFO

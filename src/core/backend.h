@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define DRV_MAX 64
+#define DRV_MAX 256
 
 typedef struct DriverInfo {
   char class_name[32];
@@ -51,6 +51,17 @@ typedef struct GpuInfo {
   unsigned int clock_base_mhz, clock_boost_mhz;
   unsigned int mem_mhz;
   unsigned int pci_lanes;
+  int feat_cuda;
+  int feat_vulkan;
+  int feat_dx12;
+  int feat_ray_tracing;
+  int feat_dlss;
+  char arch[32];
+  char die[16];
+  char process_node[16];
+  unsigned int vram_bus_bits;
+  char drv_version[32];
+  char drv_date[32];
 } GpuInfo;
 
 typedef struct GpuRuntime {
@@ -66,6 +77,8 @@ typedef struct GpuRuntime {
 typedef struct RamInfo {
   unsigned long long total_mb;
   char type[32];
+  char manufacturer[64];      /* module manufacturer (WMI)      */
+  char chip_manufacturer[32]; /* DRAM chip manufacturer (SPD)   */
   int mhz, module_count, channel;
 } RamInfo;
 

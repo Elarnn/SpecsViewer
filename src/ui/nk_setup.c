@@ -16,6 +16,7 @@ void nk_setup_init(struct AppState *S) {
     static const nk_rune ranges_cyr[] = {
         0x0020, 0x00FF, /* Latin + basic symbols */
         0x0400, 0x052F, /* Cyrillic              */
+        0x2700, 0x27BF, /* Dingbats (✓ ✗ etc)  */
         0
     };
     struct nk_font_config cfg = nk_font_config(0);

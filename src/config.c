@@ -30,6 +30,8 @@ void config_load(struct AppState *S) {
         }
         if (sscanf(line, "dont_ask_update=%d", &v) == 1)
             S->update_dont_ask = v ? 1 : 0;
+        if (sscanf(line, "dont_ask_usermode=%d", &v) == 1)
+            S->usermode_warn_dont_ask = v ? 1 : 0;
     }
     fclose(f);
 }
@@ -41,7 +43,8 @@ void config_save(const struct AppState *S) {
     CreateDirectoryA(dir, NULL);
     FILE *f = fopen(path, "w");
     if (!f) return;
-    fprintf(f, "theme=%d\n",           S->active_theme);
-    fprintf(f, "dont_ask_update=%d\n", S->update_dont_ask);
+    fprintf(f, "theme=%d\n",              S->active_theme);
+    fprintf(f, "dont_ask_update=%d\n",   S->update_dont_ask);
+    fprintf(f, "dont_ask_usermode=%d\n", S->usermode_warn_dont_ask);
     fclose(f);
 }
