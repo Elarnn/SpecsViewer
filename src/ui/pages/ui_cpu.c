@@ -6,6 +6,7 @@
 
 void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
   char buf[128];
+  struct nk_color vc = theme_get_value_color((AppTheme)S->active_theme);
 
   struct nk_rect content = nk_window_get_content_region(ctx);
 
@@ -26,8 +27,8 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
     nk_layout_row_template_end(ctx);
 
     nk_label(ctx, "CPU Model:", NK_TEXT_RIGHT);
-    nk_label(ctx, S->snap.data.cpu.model[0] ? S->snap.data.cpu.model : "-",
-             NK_TEXT_CENTERED);
+    nk_label_val(ctx, S->snap.data.cpu.model[0] ? S->snap.data.cpu.model : "-",
+                 NK_TEXT_CENTERED, vc);
 
     nk_layout_row_template_begin(ctx, 26);
     nk_layout_row_template_push_static(ctx, 140);
@@ -38,11 +39,11 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
 
     nk_label(ctx, "Cores:", NK_TEXT_RIGHT);
     snprintf(buf, sizeof(buf), "%d", S->snap.data.cpu.cores);
-    nk_label(ctx, buf, NK_TEXT_CENTERED);
+    nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
     nk_label(ctx, "Threads:", NK_TEXT_RIGHT);
     snprintf(buf, sizeof(buf), "%d", S->snap.data.cpu.threads);
-    nk_label(ctx, buf, NK_TEXT_CENTERED);
+    nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
     nk_layout_row_template_begin(ctx, 26);
     nk_layout_row_template_push_static(ctx, 140);
@@ -52,7 +53,7 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
 
     nk_label(ctx, "Base frequency:", NK_TEXT_RIGHT);
     snprintf(buf, sizeof(buf), "%d MHz", S->snap.data.cpu.base_mhz);
-    nk_label(ctx, buf, NK_TEXT_CENTERED);
+    nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
     nk_spacer(ctx);
 
@@ -67,15 +68,15 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
 
     nk_label(ctx, "Family:", NK_TEXT_RIGHT);
     snprintf(buf, sizeof(buf), "%d", S->snap.data.cpu.family);
-    nk_label(ctx, buf, NK_TEXT_CENTERED);
+    nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
     nk_label(ctx, "Model:", NK_TEXT_RIGHT);
     snprintf(buf, sizeof(buf), "%d", S->snap.data.cpu.model_id);
-    nk_label(ctx, buf, NK_TEXT_CENTERED);
+    nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
     nk_label(ctx, "Stepping:", NK_TEXT_RIGHT);
     snprintf(buf, sizeof(buf), "%d", S->snap.data.cpu.stepping);
-    nk_label(ctx, buf, NK_TEXT_CENTERED);
+    nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
     nk_layout_row_template_begin(ctx, 50);
     nk_layout_row_template_push_static(ctx, 140);
@@ -85,8 +86,10 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
 
     nk_label(ctx, "Instructions:", NK_TEXT_ALIGN_RIGHT | NK_TEXT_ALIGN_TOP);
     nk_spacer(ctx);
-    nk_label_wrap(ctx,
-                  S->snap.data.cpu.instructions[0] ? S->snap.data.cpu.instructions : "-");
+    if (vc.a == 0)
+      nk_label_wrap(ctx, S->snap.data.cpu.instructions[0] ? S->snap.data.cpu.instructions : "-");
+    else
+      nk_label_colored_wrap(ctx, S->snap.data.cpu.instructions[0] ? S->snap.data.cpu.instructions : "-", vc);
 
     nk_layout_row_dynamic(ctx, 160, 2);
     nk_spacer(ctx);
@@ -99,17 +102,17 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
       nk_label(ctx, "L1 Data", NK_TEXT_CENTERED);
       snprintf(buf, sizeof(buf), "%d x %d KBytes", S->snap.data.cpu.cache_l1d_x,
                S->snap.data.cpu.cache_l1d_kb);
-      nk_label(ctx, buf, NK_TEXT_CENTERED);
+      nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
       snprintf(buf, sizeof(buf), "%d-way", S->snap.data.cpu.cache_l1d_way);
-      nk_label(ctx, buf, NK_TEXT_CENTERED);
+      nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
       /* L1 Inst */
       nk_label(ctx, "L1 Inst", NK_TEXT_CENTERED);
       snprintf(buf, sizeof(buf), "%d x %d KBytes", S->snap.data.cpu.cache_l1i_x,
                S->snap.data.cpu.cache_l1i_kb);
-      nk_label(ctx, buf, NK_TEXT_CENTERED);
+      nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
       snprintf(buf, sizeof(buf), "%d-way", S->snap.data.cpu.cache_l1i_way);
-      nk_label(ctx, buf, NK_TEXT_CENTERED);
+      nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
       /* Level 2 */
       nk_label(ctx, "Level 2", NK_TEXT_CENTERED);
@@ -119,9 +122,9 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
       else
         snprintf(buf, sizeof(buf), "%d x %d KBytes", S->snap.data.cpu.cache_l2_x,
                  S->snap.data.cpu.cache_l2_kb);
-      nk_label(ctx, buf, NK_TEXT_CENTERED);
+      nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
       snprintf(buf, sizeof(buf), "%d-way", S->snap.data.cpu.cache_l2_way);
-      nk_label(ctx, buf, NK_TEXT_CENTERED);
+      nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
       /* Level 3 */
       nk_label(ctx, "Level 3", NK_TEXT_CENTERED);
@@ -131,9 +134,9 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
       else
         snprintf(buf, sizeof(buf), "%d x %d KBytes", S->snap.data.cpu.cache_l3_x,
                  S->snap.data.cpu.cache_l3_kb);
-      nk_label(ctx, buf, NK_TEXT_CENTERED);
+      nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
       snprintf(buf, sizeof(buf), "%d-way", S->snap.data.cpu.cache_l3_way);
-      nk_label(ctx, buf, NK_TEXT_CENTERED);
+      nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
       nk_group_end(ctx);
     }

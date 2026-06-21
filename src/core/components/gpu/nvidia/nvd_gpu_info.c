@@ -459,6 +459,231 @@ int get_nvd_gpu_current_core_mem_mhz(unsigned int *out_core_mhz,
   return ok;
 }
 
+static void nvd_read_reg_strA(HKEY hKey, const char *name, char *out, DWORD sz) {
+  DWORD type = 0, cb = sz;
+  if (RegQueryValueExA(hKey, name, NULL, &type, (LPBYTE)out, &cb) != ERROR_SUCCESS
+      || type != REG_SZ)
+    out[0] = '\0';
+}
+
+static void nvd_wide_to_utf8(const wchar_t *w, char *out, int outsz) {
+  WideCharToMultiByte(CP_UTF8, 0, w, -1, out, outsz, NULL, NULL);
+}
+
+int get_nvd_gpu_driver_info(char *ver,  size_t ver_sz,
+                             char *date, size_t date_sz) {
+  if (ver)  ver[0]  = '\0';
+  if (date) date[0] = '\0';
+
+  /* 1. Driver version via NvAPI_SYS_GetDisplayDriverInfo */
+  if (ver && ver_sz) {
+    if (nvapi_dyn_load()) {
+      if (pNvAPI_SYS_GetDisplayDriverInfo && pNvAPI_Initialize() == NVAPI_OK) {
+        NV_DISPLAY_DRIVER_INFO info;
+        memset(&info, 0, sizeof(info));
+        info.version = NV_DISPLAY_DRIVER_INFO_VER;
+        if (pNvAPI_SYS_GetDisplayDriverInfo(&info) == NVAPI_OK)
+          snprintf(ver, ver_sz, "%u.%02u",
+                   info.driverVersion / 100, info.driverVersion % 100);
+        pNvAPI_Unload();
+      }
+      nvapi_dyn_unload();
+    }
+  }
+
+  /* 2. Driver date from display-adapter class registry key */
+  if (date && date_sz) {
+    static const char *cls =
+        "SYSTEM\\CurrentControlSet\\Control\\Class\\"
+        "{4d36e968-e325-11ce-bfc1-08002be10318}";
+    HKEY hClass;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, cls, 0, KEY_READ, &hClass) == ERROR_SUCCESS) {
+      char subname[8];
+      for (DWORD i = 0; i < 16; i++) {
+        snprintf(subname, sizeof(subname), "%04lu", i);
+        HKEY hSub;
+        if (RegOpenKeyExA(hClass, subname, 0, KEY_READ, &hSub) != ERROR_SUCCESS)
+          break;
+        char provider[64] = {0};
+        nvd_read_reg_strA(hSub, "ProviderName", provider, sizeof(provider));
+        if (_stricmp(provider, "NVIDIA") == 0) {
+          nvd_read_reg_strA(hSub, "DriverDate", date, (DWORD)date_sz);
+          RegCloseKey(hSub);
+          break;
+        }
+        RegCloseKey(hSub);
+      }
+      RegCloseKey(hClass);
+    }
+  }
+
+  return 1;
+}
+
+static const char *nvd_arch_name(NvU32 arch_id) {
+  switch (arch_id) {
+  case NV_GPU_ARCHITECTURE_GF100:
+  case NV_GPU_ARCHITECTURE_GF110: return "Fermi";
+  case NV_GPU_ARCHITECTURE_GK100:
+  case NV_GPU_ARCHITECTURE_GK110:
+  case NV_GPU_ARCHITECTURE_GK200: return "Kepler";
+  case NV_GPU_ARCHITECTURE_GM000:
+  case NV_GPU_ARCHITECTURE_GM200: return "Maxwell";
+  case NV_GPU_ARCHITECTURE_GP100: return "Pascal";
+  case NV_GPU_ARCHITECTURE_GV100: return "Volta";
+  case NV_GPU_ARCHITECTURE_TU100: return "Turing";
+  case NV_GPU_ARCHITECTURE_GA100: return "Ampere";
+  case NV_GPU_ARCHITECTURE_AD100: return "Ada Lovelace";
+  case NV_GPU_ARCHITECTURE_GB200: return "Blackwell";
+  default:                        return "";
+  }
+}
+
+static const char *nvd_process_node(NvU32 arch_id) {
+  switch (arch_id) {
+  case NV_GPU_ARCHITECTURE_GF100:
+  case NV_GPU_ARCHITECTURE_GF110: return "40 nm";
+  case NV_GPU_ARCHITECTURE_GK100:
+  case NV_GPU_ARCHITECTURE_GK110:
+  case NV_GPU_ARCHITECTURE_GK200:
+  case NV_GPU_ARCHITECTURE_GM000:
+  case NV_GPU_ARCHITECTURE_GM200: return "28 nm";
+  case NV_GPU_ARCHITECTURE_GP100: return "16 nm";
+  case NV_GPU_ARCHITECTURE_GV100:
+  case NV_GPU_ARCHITECTURE_TU100: return "12 nm";
+  case NV_GPU_ARCHITECTURE_GA100: return "8 nm";
+  case NV_GPU_ARCHITECTURE_AD100:
+  case NV_GPU_ARCHITECTURE_GB200: return "4 nm";
+  default:                        return "";
+  }
+}
+
+static void nvd_build_die_name(NvU32 arch_id, NvU32 impl_id, char *out, size_t sz) {
+  const char *prefix = "";
+  int digit = -1;
+
+  switch (arch_id) {
+  case NV_GPU_ARCHITECTURE_GP100:
+    prefix = "GP";
+    switch (impl_id) {
+    case NV_GPU_ARCH_IMPLEMENTATION_GP100: digit = 100; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_GP102: digit = 102; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_GP104: digit = 104; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_GP106: digit = 106; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_GP107: digit = 107; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_GP108: digit = 108; break;
+    }
+    break;
+  case NV_GPU_ARCHITECTURE_GV100:
+    prefix = "GV";
+    if (impl_id == NV_GPU_ARCH_IMPLEMENTATION_GV100) digit = 100;
+    break;
+  case NV_GPU_ARCHITECTURE_TU100:
+    prefix = "TU";
+    switch (impl_id) {
+    case NV_GPU_ARCH_IMPLEMENTATION_TU100: digit = 100; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_TU102: digit = 102; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_TU104: digit = 104; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_TU106: digit = 106; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_TU116: digit = 116; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_TU117: digit = 117; break;
+    }
+    break;
+  case NV_GPU_ARCHITECTURE_GA100:
+    prefix = "GA";
+    switch (impl_id) {
+    case NV_GPU_ARCH_IMPLEMENTATION_GA100: digit = 100; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_GA102: digit = 102; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_GA104: digit = 104; break;
+    case 0x06: digit = 106; break;
+    case 0x07: digit = 107; break;
+    case 0x08: digit = 108; break;
+    }
+    break;
+  case NV_GPU_ARCHITECTURE_AD100:
+    prefix = "AD";
+    switch (impl_id) {
+    case NV_GPU_ARCH_IMPLEMENTATION_AD102: digit = 102; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_AD103: digit = 103; break;
+    case NV_GPU_ARCH_IMPLEMENTATION_AD104: digit = 104; break;
+    case 0x06: digit = 106; break;
+    case 0x07: digit = 107; break;
+    }
+    break;
+  case NV_GPU_ARCHITECTURE_GB200:
+    prefix = "GB";
+    switch (impl_id) {
+    case NV_GPU_ARCH_IMPLEMENTATION_GB202: digit = 202; break;
+    case 0x03: digit = 203; break;
+    case 0x04: digit = 204; break;
+    case 0x06: digit = 206; break;
+    }
+    break;
+  }
+
+  if (prefix[0] && digit >= 0)
+    snprintf(out, sz, "%s%d", prefix, digit);
+  else
+    out[0] = '\0';
+}
+
+int get_nvd_gpu_vram_bus_bits(const char *die_name, unsigned int *out_bits) {
+  if (!die_name || !out_bits) return 0;
+  static const struct { const char *die; unsigned int bits; } tbl[] = {
+    /* Fermi */   {"GF100",512}, {"GF104",256}, {"GF106",192}, {"GF108",128}, {"GF110",384}, {"GF114",256}, {"GF116",192},
+    /* Kepler */  {"GK104",256}, {"GK106",192}, {"GK107",128}, {"GK110",384}, {"GK208",64},
+    /* Maxwell */ {"GM107",128}, {"GM200",384}, {"GM204",256}, {"GM206",128},
+    /* Pascal */  {"GP100",4096},{"GP102",384}, {"GP104",256}, {"GP106",192}, {"GP107",128}, {"GP108",32},
+    /* Turing */  {"TU102",352}, {"TU104",256}, {"TU106",192}, {"TU116",192}, {"TU117",128},
+    /* Ampere */  {"GA100",6144},{"GA102",384}, {"GA103",256}, {"GA104",256}, {"GA106",192}, {"GA107",128},
+    /* Ada */     {"AD102",384}, {"AD103",256}, {"AD104",192}, {"AD106",128}, {"AD107",128},
+    /* Blackwell*/{"GB202",512}, {"GB203",256}, {"GB205",192}, {"GB206",128}, {"GB207",128},
+  };
+  for (int i = 0; i < (int)(sizeof(tbl)/sizeof(tbl[0])); i++) {
+    if (_stricmp(die_name, tbl[i].die) == 0) {
+      *out_bits = tbl[i].bits;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+int get_nvd_gpu_arch_info(char *arch, size_t arch_sz,
+                          char *die,  size_t die_sz,
+                          char *process_node, size_t pn_sz) {
+  if (!arch || !die || !process_node)
+    return 0;
+  arch[0] = die[0] = process_node[0] = '\0';
+
+  if (!pNvAPI_GPU_GetArchInfo)
+    return 0;
+
+  NvPhysicalGpuHandle gpu;
+  if (!nvd_init_first_gpu(&gpu))
+    return 0;
+
+  NV_GPU_ARCH_INFO info;
+  memset(&info, 0, sizeof(info));
+  info.version = NV_GPU_ARCH_INFO_VER;
+
+  NvAPI_Status st = pNvAPI_GPU_GetArchInfo(gpu, &info);
+  nvd_shutdown();
+  if (st != NVAPI_OK)
+    return 0;
+
+  const char *aname = nvd_arch_name(info.architecture_id);
+  if (aname[0])
+    strncpy(arch, aname, arch_sz - 1);
+
+  nvd_build_die_name(info.architecture_id, info.implementation_id, die, die_sz);
+
+  const char *pnode = nvd_process_node(info.architecture_id);
+  if (pnode[0])
+    strncpy(process_node, pnode, pn_sz - 1);
+
+  return 1;
+}
+
 int get_nvd_gpu_vram_snapshot(unsigned *out_used_mb, unsigned *out_total_mb,
                               double *out_percent) {
   if (!out_used_mb || !out_total_mb || !out_percent)

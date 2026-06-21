@@ -36,8 +36,9 @@ unsigned long long get_ram_used_mb(void)
 
 static int  g_ram_cached = 0;
 static char g_ram_type[32] = "Unknown";
+static char g_ram_manufacturer[64] = "";
 static int  g_ram_mhz = 0;
-static int g_ram_modules = 0;
+static int  g_ram_modules = 0;
 
 static const char* smbios_memtype_to_str(unsigned code)
 {
@@ -133,7 +134,7 @@ static int wmi_query_ram_once(void)
     }
 
     BSTR wql = SysAllocString(L"WQL");
-    BSTR q   = SysAllocString(L"SELECT SMBIOSMemoryType, MemoryType, Speed, ConfiguredClockSpeed FROM Win32_PhysicalMemory");
+    BSTR q   = SysAllocString(L"SELECT SMBIOSMemoryType, MemoryType, Speed, ConfiguredClockSpeed, Manufacturer FROM Win32_PhysicalMemory");
     hr = IWbemServices_ExecQuery(
         pSvc, wql, q,
         WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
@@ -164,11 +165,12 @@ static int wmi_query_ram_once(void)
 
         module_count++;              // +++ считаем модули (каждый объект = планка)
 
-        VARIANT vSmbios, vLegacy, vSpeed, vCfg;
+        VARIANT vSmbios, vLegacy, vSpeed, vCfg, vMfr;
         VariantInit(&vSmbios);
         VariantInit(&vLegacy);
         VariantInit(&vSpeed);
         VariantInit(&vCfg);
+        VariantInit(&vMfr);
 
         unsigned code = 0, speed = 0, cfg = 0;
 
@@ -191,10 +193,20 @@ static int wmi_query_ram_once(void)
         if (speed == 0) speed = cfg;
         if (speed > max_speed) max_speed = speed;
 
+        /* Manufacturer — take first non-empty value */
+        IWbemClassObject_Get(pObj, L"Manufacturer", 0, &vMfr, NULL, NULL);
+        if (g_ram_manufacturer[0] == '\0' &&
+            vMfr.vt == VT_BSTR && vMfr.bstrVal) {
+            WideCharToMultiByte(CP_UTF8, 0, vMfr.bstrVal, -1,
+                                g_ram_manufacturer, (int)sizeof(g_ram_manufacturer),
+                                NULL, NULL);
+        }
+
         VariantClear(&vSmbios);
         VariantClear(&vLegacy);
         VariantClear(&vSpeed);
         VariantClear(&vCfg);
+        VariantClear(&vMfr);
 
         IWbemClassObject_Release(pObj);
     }
@@ -220,6 +232,7 @@ static void ensure_ram_cache(void)
     if (!wmi_query_ram_once()) {
         lstrcpynA(g_ram_type, "Unknown", (int)sizeof(g_ram_type));
         g_ram_mhz = 0;
+        g_ram_manufacturer[0] = '\0';
     }
     g_ram_cached = 1;
 }
@@ -390,5 +403,11 @@ char* get_ram_type(void)
 int get_ram_nominal_freq_mhz(void)
 {
     ensure_ram_cache();
-    return g_ram_mhz; // 0 если не удалось
+    return g_ram_mhz;
+}
+
+char *get_ram_manufacturer(void)
+{
+    ensure_ram_cache();
+    return g_ram_manufacturer;
 }

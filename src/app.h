@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <windows.h>
 #include "update/updater_check.h"
+#include "net/bench_sync.h"
 
 
 #define SCAN_IDLE 0
@@ -31,6 +32,7 @@ struct AppState {
   int drv_win_open;
   int fp_win_open;
   int usermode_warn_open;
+  int usermode_warn_dont_ask; /* 1 = suppress on future launches (saved to config) */
   char fp_text[65536];
 
   uint32_t drv_risk_flags[DRV_MAX];
@@ -77,6 +79,9 @@ struct AppState {
   UpdateState updater;
   int updater_asked;
   int update_dont_ask;    /* 1 = skip popup on future launches (saved to config) */
+
+  // ====== Bench server sync ======
+  BenchSyncState bench_sync;
 };
 
 int app_init(struct AppState *S, int w, int h, const char *title);

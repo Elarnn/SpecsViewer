@@ -196,7 +196,7 @@ static DWORD WINAPI scan_thread_proc(LPVOID param) {
   // stage 3: init DBs (once)
   if (!g_ms_ready) {
     g_ms_ready = ms_blocklist_init_from_xml(
-        &g_ms_db, "resources\\db\\SiPolicy_Enforced.xml");
+        &g_ms_db, "resources\\db\\Driverpolicy_Enforced.xml");
     if (!g_ms_ready)
       printf("[MSBlocklist] DB init failed\n");
   }

@@ -20,6 +20,8 @@ t_Rdmsr              g_rdmsr = NULL;
 t_ReadPciConfigDword  g_rdpci = NULL;
 t_WritePciConfigDword g_wrpci = NULL;
 t_ReadMemory          g_rdmem = NULL;
+t_ReadIoPortByte      g_rdio  = NULL;
+t_WriteIoPortByte     g_wrio  = NULL;
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */
 
@@ -100,6 +102,8 @@ void cpu_wr0_init(void) {
   g_rdpci = (t_ReadPciConfigDword) GetProcAddress(g_dll, "ReadPciConfigDwordEx");
   g_wrpci = (t_WritePciConfigDword)GetProcAddress(g_dll, "WritePciConfigDwordEx");
   g_rdmem = (t_ReadMemory)         GetProcAddress(g_dll, "ReadMemory");
+  g_rdio  = (t_ReadIoPortByte)     GetProcAddress(g_dll, "ReadIoPortByte");
+  g_wrio  = (t_WriteIoPortByte)    GetProcAddress(g_dll, "WriteIoPortByte");
 
   detect_cpu();
 

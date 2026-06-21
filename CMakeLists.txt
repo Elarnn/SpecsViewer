@@ -1,10 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(SpecsViewer VERSION 1.1.1 LANGUAGES C)
+project(SpecsViewer VERSION 2.0.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_GENERATOR_PLATFORM x64)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT WIN32)
     message(FATAL_ERROR "This project can only be built on Windows.")
@@ -118,7 +119,7 @@ target_link_libraries(specsviewer PRIVATE
 
 
 if(MINGW)
-    target_link_options(specsviewer PRIVATE -mwindows) # -mwindows # -mconsole
+    target_link_options(specsviewer PRIVATE -mconsole) # -mwindows # -mconsole
 
     target_link_options(specsviewer PRIVATE
         -static-libgcc

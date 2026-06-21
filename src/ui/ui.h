@@ -1,6 +1,17 @@
 // ui.h
 #pragma once
 #include "ui/nk_common.h"
+#include "ui/themes/themes.h"
+
+/* Render a spec value label. Uses theme's value accent color when configured,
+   falls back to nk_label (default text color) when alpha == 0. */
+static inline void nk_label_val(struct nk_context *ctx, const char *str,
+                                nk_flags align, struct nk_color vc) {
+    if (vc.a == 0)
+        nk_label(ctx, str, align);
+    else
+        nk_label_colored(ctx, str, align, vc);
+}
 
 #define TITLEBAR_H          28
 #define TITLEBAR_BTN_W      40
@@ -11,9 +22,9 @@ enum AppTab {
   TAB_CPU = 0,
   TAB_RAM_MBOARD,
   TAB_GPU,
-  TAB_SECURE,
   TAB_SENSORS,
   TAB_BENCH,
+  TAB_SECURE,
   TAB_ABOUT
 };
 

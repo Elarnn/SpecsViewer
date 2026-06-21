@@ -11,6 +11,8 @@ typedef BOOL (__stdcall *t_WritePciConfigDword)(BYTE bus, BYTE dev, BYTE func,
                                                 BYTE reg,  DWORD  val);
 typedef BOOL (__stdcall *t_ReadMemory)        (DWORD_PTR address, PBYTE buffer,
                                                 DWORD size);
+typedef BYTE (__stdcall *t_ReadIoPortByte)    (WORD IoPort);
+typedef VOID (__stdcall *t_WriteIoPortByte)   (WORD IoPort, BYTE Value);
 
 /* ── Shared state — defined in winring.c ─────────────────────────────────── */
 extern int     g_ready;   /* 1 if DLL loaded and driver active              */
@@ -19,6 +21,8 @@ extern t_Rdmsr g_rdmsr;   /* Rdmsr export pointer                           */
 extern t_ReadPciConfigDword  g_rdpci;  /* ReadPciConfigDwordEx  pointer     */
 extern t_WritePciConfigDword g_wrpci;  /* WritePciConfigDwordEx pointer     */
 extern t_ReadMemory          g_rdmem;  /* ReadMemory pointer                */
+extern t_ReadIoPortByte      g_rdio;   /* ReadIoPortByte pointer            */
+extern t_WriteIoPortByte     g_wrio;   /* WriteIoPortByte pointer           */
 
 /* ── CPU identification (set during init) ───────────────────────────────── */
 #define CPU_VENDOR_UNKNOWN 0

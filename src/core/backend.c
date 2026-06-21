@@ -206,6 +206,16 @@ static void get_ram_info(Backend *b) {
   b->back.data.ram.mhz = get_ram_nominal_freq_mhz();
   b->back.data.ram.module_count = get_ram_module_count();
   {
+    const char *mfr = get_ram_manufacturer();
+    snprintf(b->back.data.ram.manufacturer, sizeof(b->back.data.ram.manufacturer),
+             "%s", (mfr && mfr[0]) ? mfr : "-");
+  }
+  {
+    const char *chip = spd_get_dram_manufacturer();
+    snprintf(b->back.data.ram.chip_manufacturer, sizeof(b->back.data.ram.chip_manufacturer),
+             "%s", (chip && chip[0]) ? chip : "-");
+  }
+  {
     /* Infer channel count from module count.
        Accurate when DIMMs are placed in the manufacturer-recommended slots
        (interleaved pairing), which covers ~95% of consumer builds.
@@ -259,6 +269,23 @@ static void get_gpu_nvd_info(Backend *b) {
   get_nvd_gpu_mem_mhz(&b->back.data.gpu.mem_mhz);
   get_nvd_gpu_vram_type(b->back.data.gpu.vram_type, sizeof(b->back.data.gpu.vram_type));
   get_nvd_gpu_pcie_lanes(&b->back.data.gpu.pci_lanes);
+  get_nvd_gpu_arch_info(b->back.data.gpu.arch,         sizeof(b->back.data.gpu.arch),
+                        b->back.data.gpu.die,          sizeof(b->back.data.gpu.die),
+                        b->back.data.gpu.process_node, sizeof(b->back.data.gpu.process_node));
+  get_nvd_gpu_vram_bus_bits(b->back.data.gpu.die, &b->back.data.gpu.vram_bus_bits);
+  get_nvd_gpu_driver_info(b->back.data.gpu.drv_version, sizeof(b->back.data.gpu.drv_version),
+                          b->back.data.gpu.drv_date,    sizeof(b->back.data.gpu.drv_date));
+
+  /* Feature support derived from GPU name — no extra NVAPI session needed.
+     CUDA/Vulkan/DX12: all Maxwell+ NVIDIA GPUs support them.
+     Ray Tracing / DLSS: only RTX-class cards (Turing TU102-TU106, Ampere, Ada+). */
+  const char *gname = b->back.data.gpu.name;
+  b->back.data.gpu.feat_cuda        = 1;
+  b->back.data.gpu.feat_vulkan      = 1;
+  b->back.data.gpu.feat_dx12        = 1;
+  b->back.data.gpu.feat_ray_tracing = (strstr(gname, "RTX") != NULL) ? 1 : 0;
+  b->back.data.gpu.feat_dlss        = b->back.data.gpu.feat_ray_tracing;
+
 }
 
 static void poll_cpu(Snapshot *s) { get_cpu_load(s); }
