@@ -74,6 +74,7 @@ target_include_directories(specsviewer PRIVATE
     ${CMAKE_SOURCE_DIR}/libs/NVAPI
     ${CMAKE_SOURCE_DIR}/libs/WinRing0
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/config
     ${CMAKE_BINARY_DIR}/generated
     ${CMAKE_SOURCE_DIR}/src/ui
 )

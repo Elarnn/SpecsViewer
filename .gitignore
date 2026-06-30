@@ -1,5 +1,5 @@
 # Секреты
-src/config.secret.h
+src/config/config.secret.h
 
 # Игнорировать CMake build
 build/
