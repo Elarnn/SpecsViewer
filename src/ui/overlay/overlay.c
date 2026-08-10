@@ -1,195 +1,338 @@
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include "nk_common.h"
-#include <GLFW/glfw3native.h>
 #include "overlay.h"
-#include <windows.h>
-#include <stdio.h>
 #include <string.h>
+#include <stdio.h>
+#include <wchar.h>
 
-#define OVL_W       200
-#define OVL_MARGIN   12
-#define ROW_H        22
-#define ROW_GAP       2
-#define V_PAD         6
-#define COL_LABEL    40
-#define COL_VALUE    76
-#define COL_TEMP     60
+/* GDI overlay via UpdateLayeredWindow.
+   Pixels where GDI drew (RGB != 0) get alpha=255; cleared pixels stay
+   alpha=0. UpdateLayeredWindow with AC_SRC_ALPHA then composites correctly. */
 
-static struct nk_color col_load(double pct) {
-    if (pct >= 80.0) return nk_rgba(220, 60,  60,  255);
-    if (pct >= 50.0) return nk_rgba(230, 180, 60,  255);
-    return                  nk_rgba(100, 210, 130, 255);
+/* ── layout constants ─────────────────────────────────────────────────── */
+#define OVL_MARGIN   14
+#define FONT_H       40   /* main text character height */
+#define FSMALL_H     24   /* graph label/value character height */
+#define ROW_H        54   /* text row height */
+#define ROW_GAP       6
+#define V_PAD        12
+#define H_PAD        14
+#define COL_LABEL    80
+#define COL_VALUE   230
+#define COL_TEMP    110
+#define OVL_W       (H_PAD + COL_LABEL + COL_VALUE + COL_TEMP + H_PAD)
+
+/* graph section */
+#define GR_LABEL_W   70
+#define GR_VAL_W     70
+#define GR_W        (OVL_W - H_PAD - GR_LABEL_W - GR_VAL_W - H_PAD)
+#define GR_H         44   /* graph row height */
+#define GR_GAP        5
+#define GR_PAD        8   /* top/bottom padding of graph section */
+
+/* ── helpers ──────────────────────────────────────────────────────────── */
+
+static COLORREF cr_load(double pct) {
+    if (pct >= 80.0) return RGB(220,  60,  60);
+    if (pct >= 50.0) return RGB(230, 180,  60);
+    return                  RGB( 80, 210, 120);
 }
 
-static struct nk_color col_temp(int c) {
-    if (c >= 85) return nk_rgba(220, 60,  60,  255);
-    if (c >= 65) return nk_rgba(230, 180, 60,  255);
-    return              nk_rgba(100, 210, 130, 255);
+static COLORREF cr_temp(int c) {
+    if (c >= 85) return RGB(220,  60,  60);
+    if (c >= 65) return RGB(230, 180,  60);
+    return              RGB( 80, 210, 120);
 }
 
-static int rows_height(int n) {
+static int text_section_h(int n) {
     return 2 * V_PAD + n * ROW_H + (n - 1) * ROW_GAP;
 }
 
-void overlay_init(OverlayState *o, GLFWwindow *share) {
+static int graph_section_h(int n) {
+    return GR_PAD + n * GR_H + (n - 1) * GR_GAP + GR_PAD;
+}
+
+static int total_h(int n_text, int advanced, int n_graphs) {
+    return text_section_h(n_text) + (advanced ? graph_section_h(n_graphs) : 0);
+}
+
+static void rebuild_dib(OverlayState *o, int w, int h) {
+    if (o->hbm) { DeleteObject(o->hbm); o->hbm = NULL; o->pbits = NULL; }
+    BITMAPINFO bmi = {0};
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = w;
+    bmi.bmiHeader.biHeight      = -h;  /* top-down */
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+    o->hbm = CreateDIBSection(o->hdc_mem, &bmi, DIB_RGB_COLORS,
+                              (void **)&o->pbits, NULL, 0);
+    SelectObject(o->hdc_mem, o->hbm);
+    o->width  = w;
+    o->height = h;
+}
+
+static LRESULT CALLBACK ovl_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
+static void graph_push(OvlGraph *g, float value) {
+    double now = (double)GetTickCount64();
+    if (!g->initialized) {
+        for (int i = 0; i < OVL_GRAPH_COUNT; i++) g->values[i] = value;
+        g->head        = 0;
+        g->initialized = 1;
+        g->last_t      = now;
+        return;
+    }
+    if (now - g->last_t >= 500.0) {
+        g->values[g->head] = value;
+        g->head = (g->head + 1) % OVL_GRAPH_COUNT;
+        g->last_t = now;
+    }
+}
+
+static void wdraw(HDC hdc, int x, int y, const WCHAR *s, COLORREF c) {
+    SetTextColor(hdc, c);
+    TextOutW(hdc, x, y, s, (int)wcslen(s));
+}
+
+static void draw_graph(OverlayState *o, int x, int y, int w, int h,
+                       const OvlGraph *g, COLORREF color) {
+    if (!g->initialized || w < 2 || h < 2) return;
+
+    HPEN pen     = CreatePen(PS_SOLID, 2, color);
+    HPEN old_pen = (HPEN)SelectObject(o->hdc_mem, pen);
+
+    int inner_top = y + 2;
+    int inner_h   = h - 4;
+
+    BOOL first = TRUE;
+    for (int i = 0; i < OVL_GRAPH_COUNT; i++) {
+        int   idx = (g->head + i) % OVL_GRAPH_COUNT;
+        float v   = g->values[idx];
+        if (v < 0.0f)   v = 0.0f;
+        if (v > 100.0f) v = 100.0f;
+        float t  = v / 100.0f;
+        int   px = x + (int)((float)i * (w - 1) / (OVL_GRAPH_COUNT - 1));
+        int   py = inner_top + inner_h - 1 - (int)(t * (inner_h - 1));
+        if (first) { MoveToEx(o->hdc_mem, px, py, NULL); first = FALSE; }
+        else        LineTo(o->hdc_mem, px, py);
+    }
+
+    SelectObject(o->hdc_mem, old_pen);
+    DeleteObject(pen);
+}
+
+/* ── public API ───────────────────────────────────────────────────────── */
+
+void overlay_init(OverlayState *o, struct GLFWwindow *share) {
+    (void)share;
     memset(o, 0, sizeof(*o));
 
-    GLFWwindow *prev = glfwGetCurrentContext();
+    WNDCLASSEXA wc = {0};
+    wc.cbSize        = sizeof(wc);
+    wc.lpfnWndProc   = ovl_wndproc;
+    wc.hInstance     = GetModuleHandleA(NULL);
+    wc.lpszClassName = "SpecsOvl";
+    RegisterClassExA(&wc);
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
-    glfwWindowHint(GLFW_DECORATED,               GLFW_FALSE);
-    glfwWindowHint(GLFW_FLOATING,                GLFW_TRUE);
-    glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
-    glfwWindowHint(GLFW_RESIZABLE,               GLFW_FALSE);
-    glfwWindowHint(GLFW_VISIBLE,                 GLFW_FALSE);
-    glfwWindowHint(GLFW_FOCUS_ON_SHOW,           GLFW_FALSE);
+    HMONITOR hmon = MonitorFromPoint((POINT){0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO mi = {sizeof(mi)};
+    GetMonitorInfoA(hmon, &mi);
+    o->mon_x = mi.rcWork.left;
+    o->mon_y = mi.rcWork.top;
 
-    o->window = glfwCreateWindow(OVL_W, rows_height(3), "", NULL, share);
-    if (!o->window) { glfwMakeContextCurrent(prev); return; }
+    int init_h = total_h(3, 0, 0);
+    o->hwnd = CreateWindowExA(
+        WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST |
+        WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+        "SpecsOvl", "", WS_POPUP,
+        o->mon_x + OVL_MARGIN, o->mon_y + OVL_MARGIN, OVL_W, init_h,
+        NULL, NULL, GetModuleHandleA(NULL), NULL
+    );
+    if (!o->hwnd) return;
 
-    int mx, my, mw, mh;
-    glfwGetMonitorWorkarea(glfwGetPrimaryMonitor(), &mx, &my, &mw, &mh);
-    glfwSetWindowPos(o->window, mx + mw - OVL_W - OVL_MARGIN, my + OVL_MARGIN);
-    o->mon_x = mx;
-    o->mon_y = my;
-    o->mon_w = mw;
+    o->hdc_screen = GetDC(NULL);
+    o->hdc_mem    = CreateCompatibleDC(o->hdc_screen);
+    rebuild_dib(o, OVL_W, init_h);
 
-    HWND hwnd = glfwGetWin32Window(o->window);
-    LONG ex = GetWindowLong(hwnd, GWL_EXSTYLE);
-    SetWindowLong(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED | WS_EX_TRANSPARENT);
-    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-
-    glfwMakeContextCurrent(o->window);
-    o->ctx = nk_glfw3_init(&o->nkglfw, o->window, 0);
-
-    struct nk_font_atlas *atlas;
-    nk_glfw3_font_stash_begin(&o->nkglfw, &atlas);
-    o->font = nk_font_atlas_add_from_file(atlas, "resources\\fonts\\segoeui.ttf", 14.0f, NULL);
-    if (!o->font)
-        o->font = nk_font_atlas_add_default(atlas, 14.0f, NULL);
-    nk_glfw3_font_stash_end(&o->nkglfw);
-    if (o->font) nk_style_set_font(o->ctx, &o->font->handle);
-
-    struct nk_color bg = nk_rgba(12, 12, 12, 215);
-    o->ctx->style.window.fixed_background = nk_style_item_color(bg);
-    o->ctx->style.window.background       = bg;
-    o->ctx->style.window.border           = 0.0f;
-    o->ctx->style.window.padding          = nk_vec2(8.0f, (float)V_PAD);
-    o->ctx->style.window.spacing          = nk_vec2(4.0f, (float)ROW_GAP);
-    o->ctx->style.text.color              = nk_rgba(200, 200, 200, 255);
-
-    glfwMakeContextCurrent(prev);
+    o->hfont = CreateFontA(
+        -FONT_H, 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        NONANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+        "Segoe UI"
+    );
+    o->hfont_small = CreateFontA(
+        -FSMALL_H, 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        NONANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+        "Segoe UI"
+    );
 }
 
 void overlay_show(OverlayState *o) {
-    if (o->window) glfwShowWindow(o->window);
+    if (!o->hwnd) return;
+    ShowWindow(o->hwnd, SW_SHOWNOACTIVATE);
+    o->visible = 1;
 }
 
 void overlay_hide(OverlayState *o) {
-    if (o->window) glfwHideWindow(o->window);
+    if (!o->hwnd) return;
+    ShowWindow(o->hwnd, SW_HIDE);
+    o->visible = 0;
 }
 
-void overlay_frame(OverlayState *o, const Snapshot *snap, GLFWwindow *main_win) {
-    if (!o->window || !o->ctx) return;
+void overlay_frame(OverlayState *o, const Snapshot *snap, struct GLFWwindow *main_win) {
+    (void)main_win;
+    if (!o->hwnd || !o->pbits || !o->visible) return;
+
+    MSG msg;
+    while (PeekMessageA(&msg, o->hwnd, 0, 0, PM_REMOVE))
+        DispatchMessageA(&msg);
 
     int has_gpu = snap->data.gpu.name[0] != '\0';
     int n_rows  = 2 + (has_gpu ? 1 : 0);
+    int n_graphs = n_rows;
 
-    if (!o->sized) {
-        int h = rows_height(n_rows);
-        glfwSetWindowSize(o->window, OVL_W, h);
-        glfwSetWindowPos(o->window, o->mon_x + o->mon_w - OVL_W - OVL_MARGIN, o->mon_y + OVL_MARGIN);
-        o->sized = 1;
+    double ram_pct = 0.0;
+    if (snap->data.ram.total_mb > 0)
+        ram_pct = (double)snap->ram_rt.used_mb * 100.0 / snap->data.ram.total_mb;
+
+    graph_push(&o->g_cpu_load, (float)snap->cpu_rt.load);
+    if (has_gpu) graph_push(&o->g_gpu_load, (float)snap->gpu_rt.vram_load);
+    graph_push(&o->g_ram, (float)ram_pct);
+
+    int need_h = total_h(n_rows, o->advanced, n_graphs);
+    if (need_h != o->height) {
+        rebuild_dib(o, OVL_W, need_h);
+        SetWindowPos(o->hwnd, NULL, 0, 0, OVL_W, need_h,
+                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    int w, h;
-    glfwGetWindowSize(o->window, &w, &h);
+    memset(o->pbits, 0, (size_t)o->width * o->height * 4);
 
-    glfwMakeContextCurrent(o->window);
-    nk_glfw3_new_frame(&o->nkglfw);
+    /* ── text rows ─────────────────────────────────────────────────── */
+    SelectObject(o->hdc_mem, o->hfont);
+    SetBkMode(o->hdc_mem, TRANSPARENT);
 
-    char buf[64];
+    TEXTMETRIC tm;
+    GetTextMetricsA(o->hdc_mem, &tm);
+    int ty = (ROW_H - tm.tmHeight) / 2;
 
-    if (nk_begin_titled(o->ctx, "ovl", "",
-                        nk_rect(0, 0, (float)w, (float)h),
-                        NK_WINDOW_NO_SCROLLBAR)) {
+    COLORREF gray = RGB(170, 170, 170);
+    WCHAR buf[64];
+    int row = 0;
 
-        struct nk_color gray = nk_rgba(140, 140, 140, 255);
+#define RY(r)  (V_PAD + (r) * (ROW_H + ROW_GAP) + ty)
+#define RX0    H_PAD
+#define RX1    (H_PAD + COL_LABEL)
+#define RX2    (H_PAD + COL_LABEL + COL_VALUE)
 
-        /* ── CPU ── */
-        nk_layout_row_begin(o->ctx, NK_STATIC, ROW_H, 3);
-            nk_layout_row_push(o->ctx, COL_LABEL);
-            nk_label_colored(o->ctx, "CPU", NK_TEXT_LEFT, gray);
+    wdraw(o->hdc_mem, RX0, RY(row), L"CPU", gray);
+    swprintf(buf, 64, L"%.1f%%", snap->cpu_rt.load);
+    wdraw(o->hdc_mem, RX1, RY(row), buf, cr_load(snap->cpu_rt.load));
+    if (snap->cpu_rt.cpu_temp >= 0) {
+        swprintf(buf, 64, L"%d°C", snap->cpu_rt.cpu_temp);
+        wdraw(o->hdc_mem, RX2, RY(row), buf, cr_temp(snap->cpu_rt.cpu_temp));
+    }
+    row++;
 
-            nk_layout_row_push(o->ctx, COL_VALUE);
-            snprintf(buf, sizeof(buf), "%.1f%%", snap->cpu_rt.load);
-            nk_label_colored(o->ctx, buf, NK_TEXT_LEFT, col_load(snap->cpu_rt.load));
+    if (has_gpu) {
+        wdraw(o->hdc_mem, RX0, RY(row), L"GPU", gray);
+        swprintf(buf, 64, L"%.1f%%", snap->gpu_rt.vram_load);
+        wdraw(o->hdc_mem, RX1, RY(row), buf, cr_load(snap->gpu_rt.vram_load));
+        swprintf(buf, 64, L"%d°C", snap->gpu_rt.clock_temp);
+        wdraw(o->hdc_mem, RX2, RY(row), buf, cr_temp(snap->gpu_rt.clock_temp));
+        row++;
+    }
 
-            nk_layout_row_push(o->ctx, COL_TEMP);
-            if (snap->cpu_rt.cpu_temp >= 0) {
-                snprintf(buf, sizeof(buf), "%d\xc2\xb0""C", snap->cpu_rt.cpu_temp);
-                nk_label_colored(o->ctx, buf, NK_TEXT_LEFT, col_temp(snap->cpu_rt.cpu_temp));
-            } else {
-                nk_spacer(o->ctx);
-            }
-        nk_layout_row_end(o->ctx);
+    wdraw(o->hdc_mem, RX0, RY(row), L"RAM", gray);
+    if (snap->data.ram.total_mb > 0) {
+        swprintf(buf, 64, L"%.1f / %.0f GB",
+                 snap->ram_rt.used_mb   / 1024.0,
+                 snap->data.ram.total_mb / 1024.0);
+        wdraw(o->hdc_mem, RX1, RY(row), buf, cr_load(ram_pct));
+    } else {
+        wdraw(o->hdc_mem, RX1, RY(row), L"N/A", gray);
+    }
 
-        /* ── GPU ── */
+#undef RY
+#undef RX0
+#undef RX1
+#undef RX2
+
+    /* ── graph section ─────────────────────────────────────────────── */
+    if (o->advanced) {
+        SelectObject(o->hdc_mem, o->hfont_small);
+        GetTextMetricsA(o->hdc_mem, &tm);
+        int sty  = (GR_H - tm.tmHeight) / 2;
+        int base = text_section_h(n_rows) + GR_PAD;
+
+#define GY(r)  (base + (r) * (GR_H + GR_GAP))
+#define GLX    H_PAD
+#define GGX    (H_PAD + GR_LABEL_W)
+#define GVX    (H_PAD + GR_LABEL_W + GR_W + 4)
+
+        int gr = 0;
+
+        /* CPU load */
+        wdraw(o->hdc_mem, GLX, GY(gr) + sty, L"CPU", gray);
+        draw_graph(o, GGX, GY(gr), GR_W, GR_H,
+                   &o->g_cpu_load, cr_load(snap->cpu_rt.load));
+        swprintf(buf, 64, L"%.0f%%", snap->cpu_rt.load);
+        wdraw(o->hdc_mem, GVX, GY(gr) + sty, buf, cr_load(snap->cpu_rt.load));
+        gr++;
+
+        /* GPU load */
         if (has_gpu) {
-            nk_layout_row_begin(o->ctx, NK_STATIC, ROW_H, 3);
-                nk_layout_row_push(o->ctx, COL_LABEL);
-                nk_label_colored(o->ctx, "GPU", NK_TEXT_LEFT, gray);
-
-                nk_layout_row_push(o->ctx, COL_VALUE);
-                snprintf(buf, sizeof(buf), "%.1f%%", snap->gpu_rt.vram_load);
-                nk_label_colored(o->ctx, buf, NK_TEXT_LEFT, col_load(snap->gpu_rt.vram_load));
-
-                nk_layout_row_push(o->ctx, COL_TEMP);
-                snprintf(buf, sizeof(buf), "%d\xc2\xb0""C", snap->gpu_rt.clock_temp);
-                nk_label_colored(o->ctx, buf, NK_TEXT_LEFT, col_temp(snap->gpu_rt.clock_temp));
-            nk_layout_row_end(o->ctx);
+            wdraw(o->hdc_mem, GLX, GY(gr) + sty, L"GPU", gray);
+            draw_graph(o, GGX, GY(gr), GR_W, GR_H,
+                       &o->g_gpu_load, cr_load(snap->gpu_rt.vram_load));
+            swprintf(buf, 64, L"%.0f%%", snap->gpu_rt.vram_load);
+            wdraw(o->hdc_mem, GVX, GY(gr) + sty, buf, cr_load(snap->gpu_rt.vram_load));
+            gr++;
         }
 
-        /* ── RAM ── */
-        nk_layout_row_begin(o->ctx, NK_STATIC, ROW_H, 3);
-            nk_layout_row_push(o->ctx, COL_LABEL);
-            nk_label_colored(o->ctx, "RAM", NK_TEXT_LEFT, gray);
+        /* RAM */
+        wdraw(o->hdc_mem, GLX, GY(gr) + sty, L"RAM", gray);
+        draw_graph(o, GGX, GY(gr), GR_W, GR_H,
+                   &o->g_ram, cr_load(ram_pct));
+        swprintf(buf, 64, L"%.0f%%", ram_pct);
+        wdraw(o->hdc_mem, GVX, GY(gr) + sty, buf, cr_load(ram_pct));
 
-            nk_layout_row_push(o->ctx, COL_VALUE);
-            if (snap->data.ram.total_mb > 0) {
-                double pct = (double)snap->ram_rt.used_mb * 100.0 / (double)snap->data.ram.total_mb;
-                snprintf(buf, sizeof(buf), "%.1f/%.0f GB",
-                         snap->ram_rt.used_mb  / 1024.0,
-                         snap->data.ram.total_mb / 1024.0);
-                nk_label_colored(o->ctx, buf, NK_TEXT_LEFT, col_load(pct));
-            } else {
-                nk_label_colored(o->ctx, "N/A", NK_TEXT_LEFT, gray);
-            }
-
-            nk_layout_row_push(o->ctx, COL_TEMP);
-            nk_spacer(o->ctx);
-        nk_layout_row_end(o->ctx);
+#undef GY
+#undef GLX
+#undef GGX
+#undef GVX
     }
-    nk_end(o->ctx);
 
-    int fbw, fbh;
-    glfwGetFramebufferSize(o->window, &fbw, &fbh);
-    glViewport(0, 0, fbw, fbh);
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    nk_glfw3_render(&o->nkglfw, NK_ANTI_ALIASING_ON, 512 * 1024, 128 * 1024);
-    glfwSwapBuffers(o->window);
+    /* ── alpha fix-up ──────────────────────────────────────────────── */
+    int npx = o->width * o->height;
+    for (int i = 0; i < npx; i++) {
+        if (o->pbits[i] & 0x00FFFFFFu)
+            o->pbits[i] |= 0xFF000000u;
+    }
 
-    glfwMakeContextCurrent(main_win);
+    /* ── present ───────────────────────────────────────────────────── */
+    POINT          pt_src = {0, 0};
+    POINT          pt_dst = {o->mon_x + OVL_MARGIN, o->mon_y + OVL_MARGIN};
+    SIZE           sz     = {o->width, o->height};
+    BLENDFUNCTION  blend  = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    UpdateLayeredWindow(o->hwnd, o->hdc_screen, &pt_dst, &sz,
+                        o->hdc_mem, &pt_src, 0, &blend, ULW_ALPHA);
 }
 
 void overlay_shutdown(OverlayState *o) {
-    if (!o->window) return;
-    GLFWwindow *prev = glfwGetCurrentContext();
-    glfwMakeContextCurrent(o->window);
-    nk_glfw3_shutdown(&o->nkglfw);
-    glfwMakeContextCurrent(prev);
-    glfwDestroyWindow(o->window);
-    o->window = NULL;
+    if (!o->hwnd) return;
+    ShowWindow(o->hwnd, SW_HIDE);
+    if (o->hfont_small)  { DeleteObject(o->hfont_small);   o->hfont_small = NULL; }
+    if (o->hfont)        { DeleteObject(o->hfont);         o->hfont = NULL; }
+    if (o->hbm)          { DeleteObject(o->hbm);           o->hbm = NULL; }
+    if (o->hdc_mem)      { DeleteDC(o->hdc_mem);           o->hdc_mem = NULL; }
+    if (o->hdc_screen)   { ReleaseDC(NULL, o->hdc_screen); o->hdc_screen = NULL; }
+    DestroyWindow(o->hwnd);
+    o->hwnd   = NULL;
+    o->pbits  = NULL;
+    o->visible = 0;
 }

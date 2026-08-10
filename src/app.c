@@ -102,7 +102,7 @@ void app_frame(struct AppState *S) {
 
     nk_setup_render(S);
 
-    if (S->overlay_enabled && S->overlay.window)
+    if (S->overlay_enabled && S->overlay.hwnd)
         overlay_frame(&S->overlay, &S->snap, S->window);
 }
 

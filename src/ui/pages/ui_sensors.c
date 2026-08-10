@@ -74,17 +74,20 @@ void sensors_update_graphs(const struct AppState *S) {
 void ui_page_sensors(struct nk_context *ctx, struct AppState *S) {
   char buf[128];
 
-  /* Overlay checkbox */
+  /* Overlay controls */
   nk_layout_row_dynamic(ctx, 26, 1);
   int prev = S->overlay_enabled;
-  nk_checkbox_label(ctx, "Show overlay (top-right corner)", &S->overlay_enabled);
+  nk_checkbox_label(ctx, "Show overlay", &S->overlay_enabled);
   if (S->overlay_enabled != prev) {
     if (S->overlay_enabled) overlay_show(&S->overlay);
     else                    overlay_hide(&S->overlay);
   }
 
+  nk_layout_row_dynamic(ctx, 26, 1);
+  nk_checkbox_label(ctx, "Advanced information", &S->overlay.advanced);
+
   struct nk_rect region = nk_window_get_content_region(ctx);
-  nk_layout_row_dynamic(ctx, region.h - 34, 1);
+  nk_layout_row_dynamic(ctx, region.h - 64, 1);
   if (nk_group_begin(ctx, "Wrapper", 0)) {
 
     // ------------------------------------------------------------------ CPU --
