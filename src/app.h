@@ -8,6 +8,7 @@
 #include <windows.h>
 #include "update/updater_check.h"
 #include "net/bench_sync.h"
+#include "ui/overlay/overlay.h"
 
 
 #define SCAN_IDLE 0
@@ -82,6 +83,10 @@ struct AppState {
 
   // ====== Bench server sync ======
   BenchSyncState bench_sync;
+
+  // ====== HW Overlay ======
+  OverlayState overlay;
+  int overlay_enabled;
 };
 
 int app_init(struct AppState *S, int w, int h, const char *title);

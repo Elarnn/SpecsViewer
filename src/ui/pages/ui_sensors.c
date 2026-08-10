@@ -3,6 +3,7 @@
 #include "string.h"
 #include "ui.h"
 #include "ui/nk_common.h"
+#include "ui/overlay/overlay.h"
 #include <GLFW/glfw3.h>
 
 #define RT_GRAPH_HISTORY_COUNT 120
@@ -70,10 +71,20 @@ void sensors_update_graphs(const struct AppState *S) {
   rt_graph_update_slow(&ram_graph, ram_pct, RT_GRAPH_UPDATE_INTERVAL);
 }
 
-void ui_page_sensors(struct nk_context *ctx, const struct AppState *S) {
+void ui_page_sensors(struct nk_context *ctx, struct AppState *S) {
   char buf[128];
 
-  nk_layout_row_dynamic(ctx, nk_window_get_content_region(ctx).h, 1);
+  /* Overlay checkbox */
+  nk_layout_row_dynamic(ctx, 26, 1);
+  int prev = S->overlay_enabled;
+  nk_checkbox_label(ctx, "Show overlay (top-right corner)", &S->overlay_enabled);
+  if (S->overlay_enabled != prev) {
+    if (S->overlay_enabled) overlay_show(&S->overlay);
+    else                    overlay_hide(&S->overlay);
+  }
+
+  struct nk_rect region = nk_window_get_content_region(ctx);
+  nk_layout_row_dynamic(ctx, region.h - 34, 1);
   if (nk_group_begin(ctx, "Wrapper", 0)) {
 
     // ------------------------------------------------------------------ CPU --

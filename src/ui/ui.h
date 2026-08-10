@@ -52,7 +52,7 @@ void ui_page_ram(struct nk_context *ctx, const struct AppState *S);
 void ui_page_gpu(struct nk_context *ctx, const struct AppState *S);
 void ui_page_about(struct nk_context *ctx, struct AppState *S);
 void ui_page_secure(struct nk_context *ctx, const struct AppState *S);
-void ui_page_sensors(struct nk_context *ctx, const struct AppState *S);
+void ui_page_sensors(struct nk_context *ctx, struct AppState *S);
 void sensors_update_graphs(const struct AppState *S);
 void ui_page_bench(struct nk_context *ctx, const struct AppState *S);
 void ui_window_drivers(struct nk_context *ctx, struct AppState *S, int ww,

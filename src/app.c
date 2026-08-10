@@ -64,6 +64,8 @@ int app_init(struct AppState *S, int w, int h, const char *title) {
 
     bench_init(&S->bench);
     bench_sync_init(&S->bench_sync);
+    S->overlay_enabled = 0;
+    overlay_init(&S->overlay, S->window);
 
     /* Backend + updater */
     if (!backend_start(&S->backend))
@@ -99,6 +101,9 @@ void app_frame(struct AppState *S) {
     ui_frame(S);
 
     nk_setup_render(S);
+
+    if (S->overlay_enabled && S->overlay.window)
+        overlay_frame(&S->overlay, &S->snap, S->window);
 }
 
 void app_shutdown(struct AppState *S) {
@@ -118,6 +123,7 @@ void app_shutdown(struct AppState *S) {
     DeleteCriticalSection(&S->scan_cs);
 
     update_cleanup(&S->updater);
+    overlay_shutdown(&S->overlay);
     bench_sync_shutdown(&S->bench_sync);
     bench_shutdown(&S->bench);
     backend_stop(&S->backend);
