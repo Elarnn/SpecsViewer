@@ -2,7 +2,6 @@
 
 /* ── Server settings ──────────────────────────────────────────────────────── */
 #define BENCH_SERVER_HOST  L"specsviewer.elarnn.workers.dev"
-#include "config.secret.h"
 
 struct AppState;
 

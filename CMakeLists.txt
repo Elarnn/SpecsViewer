@@ -120,7 +120,7 @@ target_link_libraries(specsviewer PRIVATE
 
 
 if(MINGW)
-    target_link_options(specsviewer PRIVATE -mconsole) # -mwindows # -mconsole
+    target_link_options(specsviewer PRIVATE -mwindows) # -mwindows # -mconsole
 
     target_link_options(specsviewer PRIVATE
         -static-libgcc

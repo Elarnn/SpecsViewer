@@ -1,6 +1,3 @@
-# Секреты
-src/config/config.secret.h
-
 # Игнорировать CMake build
 build/
 build*/        
