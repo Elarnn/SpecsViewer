@@ -1,6 +1,8 @@
 // cpu_info.c
 #include "../../backend.h"
+#include "../components.h"
 #include <stddef.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -682,3 +684,185 @@ void get_cpu_load(Snapshot *s) {
   prev_kernel = kernel;
   prev_user = user;
 }
+
+/* =====================================================================
+   Physical packages (sockets) — multi-CPU support
+   ===================================================================== */
+#if defined(_WIN32)
+
+static SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *
+lpi_query(LOGICAL_PROCESSOR_RELATIONSHIP rel, DWORD *out_len) {
+  DWORD len = 0;
+  GetLogicalProcessorInformationEx(rel, NULL, &len);
+  if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || len == 0)
+    return NULL;
+  SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *buf =
+      (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)malloc(len);
+  if (!buf)
+    return NULL;
+  if (!GetLogicalProcessorInformationEx(rel, buf, &len)) {
+    free(buf);
+    return NULL;
+  }
+  *out_len = len;
+  return buf;
+}
+
+static int popcount_mask(unsigned long long m) {
+  int n = 0;
+  while (m) {
+    m &= m - 1;
+    n++;
+  }
+  return n;
+}
+
+int get_cpu_package_count(void) {
+  DWORD len = 0;
+  SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *buf =
+      lpi_query(RelationProcessorPackage, &len);
+  if (!buf)
+    return 1;
+
+  int n = 0;
+  BYTE *p = (BYTE *)buf, *end = p + len;
+  while (p < end) {
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *e =
+        (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)p;
+    if (e->Relationship == RelationProcessorPackage)
+      n++;
+    p += e->Size;
+  }
+  free(buf);
+  return n > 0 ? n : 1;
+}
+
+/* Copy the processor-group masks of the pkg-th package into out[].
+   Returns the number of groups copied (0 = package not found). */
+static int package_groups(int pkg, GROUP_AFFINITY *out, int max_groups) {
+  DWORD len = 0;
+  SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *buf =
+      lpi_query(RelationProcessorPackage, &len);
+  if (!buf)
+    return 0;
+
+  int idx = 0, got = 0;
+  BYTE *p = (BYTE *)buf, *end = p + len;
+  while (p < end) {
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *e =
+        (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)p;
+    if (e->Relationship == RelationProcessorPackage) {
+      if (idx == pkg) {
+        int gc = (int)e->Processor.GroupCount;
+        for (int g = 0; g < gc && g < max_groups; g++)
+          out[got++] = e->Processor.GroupMask[g];
+        break;
+      }
+      idx++;
+    }
+    p += e->Size;
+  }
+  free(buf);
+  return got;
+}
+
+int get_cpu_package_core_thread_count(int pkg, int *out_cores,
+                                      int *out_threads) {
+  if (out_cores)
+    *out_cores = 0;
+  if (out_threads)
+    *out_threads = 0;
+
+  GROUP_AFFINITY groups[8];
+  int ng = package_groups(pkg, groups, 8);
+  if (!ng)
+    return 0;
+
+  DWORD len = 0;
+  SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *buf =
+      lpi_query(RelationProcessorCore, &len);
+  if (!buf)
+    return 0;
+
+  int cores = 0, threads = 0;
+  BYTE *p = (BYTE *)buf, *end = p + len;
+  while (p < end) {
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *e =
+        (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)p;
+    if (e->Relationship == RelationProcessorCore) {
+      int gc = (int)e->Processor.GroupCount;
+      int matched = 0;
+      for (int g = 0; g < gc && !matched; g++) {
+        const GROUP_AFFINITY *cm = &e->Processor.GroupMask[g];
+        for (int k = 0; k < ng; k++) {
+          if (groups[k].Group == cm->Group && (groups[k].Mask & cm->Mask)) {
+            cores++;
+            threads += popcount_mask(
+                (unsigned long long)(groups[k].Mask & cm->Mask));
+            matched = 1;
+            break;
+          }
+        }
+      }
+    }
+    p += e->Size;
+  }
+  free(buf);
+
+  if (out_cores)
+    *out_cores = cores;
+  if (out_threads)
+    *out_threads = threads;
+  return cores > 0 && threads > 0;
+}
+
+int cpu_pin_to_package(int pkg, CpuAffinitySave *saved) {
+  if (saved)
+    saved->valid = 0;
+
+  GROUP_AFFINITY groups[8];
+  if (!package_groups(pkg, groups, 8))
+    return 0;
+
+  GROUP_AFFINITY want, prev;
+  memset(&want, 0, sizeof(want));
+  memset(&prev, 0, sizeof(prev));
+  want.Group = groups[0].Group;
+  want.Mask  = groups[0].Mask;
+
+  if (!SetThreadGroupAffinity(GetCurrentThread(), &want, &prev))
+    return 0;
+
+  if (saved) {
+    saved->group = prev.Group;
+    saved->mask  = (unsigned long long)prev.Mask;
+    saved->valid = 1;
+  }
+  return 1;
+}
+
+void cpu_unpin(const CpuAffinitySave *saved) {
+  if (!saved || !saved->valid)
+    return;
+  GROUP_AFFINITY ga;
+  memset(&ga, 0, sizeof(ga));
+  ga.Group = saved->group;
+  ga.Mask  = (KAFFINITY)saved->mask;
+  SetThreadGroupAffinity(GetCurrentThread(), &ga, NULL);
+}
+
+#else
+int get_cpu_package_count(void) { return 1; }
+int get_cpu_package_core_thread_count(int pkg, int *out_cores, int *out_threads) {
+  (void)pkg;
+  if (out_cores) *out_cores = 0;
+  if (out_threads) *out_threads = 0;
+  return 0;
+}
+int cpu_pin_to_package(int pkg, CpuAffinitySave *saved) {
+  (void)pkg;
+  if (saved) saved->valid = 0;
+  return 0;
+}
+void cpu_unpin(const CpuAffinitySave *saved) { (void)saved; }
+#endif

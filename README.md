@@ -2,7 +2,7 @@
 
 **SpecsViewer** is a Windows desktop application for viewing detailed PC hardware information, checking platform security settings, running a basic benchmark, and generating a digital fingerprint of the system.
 
-The program is focused not only on showing basic specifications, but also on analyzing low-level hardware and security-related data: CPU features, RAM, motherboard, GPU, BIOS/UEFI state, TPM, Secure Boot, drivers, benchmark results, and other platform characteristics.
+The program is focused not only on showing basic specifications, but also on analyzing low-level hardware and security-related data: CPU features, RAM, motherboard, GPU, BIOS/UEFI state, TPM, Secure Boot, benchmark results, and other platform characteristics.
 
 SpecsViewer is written in **C** using the **C99** standard. The application uses **GLFW3** for window management, **Nuklear** for the graphical user interface, **GLAD** for OpenGL function loading, the **NVIDIA driver/API** for NVIDIA GPU information, and **WinRing0** for low-level hardware access.
 
@@ -40,7 +40,9 @@ It can show key CPU characteristics such as:
 - Core and thread count
 - Supported CPU features
 - Architecture-related capabilities
-- Basic frequency information
+- Base frequency and the current effective frequency
+- Core VID (the core voltage requested by the CPU) read via MSR (administrator mode)
+- Switching between processors on multi-socket systems (click the CPU name, marked with a dropdown arrow)
 
 This makes the CPU section useful not only for normal specification viewing, but also for understanding what technologies are supported by the processor.
 
@@ -51,6 +53,8 @@ This makes the CPU section useful not only for normal specification viewing, but
 SpecsViewer provides information about installed system memory.
 
 The RAM section is intended to quickly show the memory configuration of the machine and help identify the amount and basic characteristics of installed RAM.
+
+The DRAM voltage configured by the firmware (SMBIOS "Configured Voltage") is shown when the BIOS reports it; on most boards this reflects the value set in BIOS or by the active XMP profile.
 
 ---
 
@@ -70,6 +74,8 @@ At the current stage, detailed GPU information is supported only for **NVIDIA** 
 
 This allows the application to include GPU data in the overall hardware overview, but support for AMD and Intel graphics cards may be added later.
 
+When several graphics adapters are present (for example an integrated GPU next to a discrete one), the active adapter can be switched by clicking the adapter name on the GPU page (it is marked with a dropdown arrow). Non-NVIDIA adapters show basic PnP and driver information.
+
 ---
 
 ### Platform security check
@@ -83,27 +89,10 @@ Examples of analyzed mechanisms:
 - TPM state
 - Secure Boot state
 - BIOS/UEFI-related information
-- Driver-related security checks
+- Virtualization-based security (VBS, HVCI) and CPU protections (NX, SMEP, CET)
 - General platform integrity indicators
 
 The result is presented in a more understandable way than raw system data, making it easier to evaluate the current security state of the PC.
-
----
-
-### Vulnerable driver detection
-
-SpecsViewer includes driver-related checks to help identify potentially risky or vulnerable system components.
-
-The application compares detected system drivers with known vulnerable driver databases, including:
-
-- Microsoft vulnerable driver blocklist;
-- LOLDrivers database.
-
-This helps detect drivers that may be abused for privilege escalation, kernel access, bypassing security mechanisms, or other low-level attacks.
-
-Drivers work at a very low level in Windows, so checking them is important for platform security analysis.
-
-The result should be treated as an additional security indicator. If a vulnerable driver is detected, it is recommended to review its origin, update the related software, or remove the driver if it is not needed.
 
 ---
 
@@ -119,11 +108,37 @@ The score helps to quickly understand whether the system looks properly configur
 
 ### Benchmark
 
-SpecsViewer includes a benchmark section for testing system performance.
+SpecsViewer includes a benchmark section for testing CPU performance.
 
 The benchmark gives the user a quick way to estimate the current performance state of the machine and compare results after hardware, driver, or configuration changes.
 
 The result can be useful for checking whether the system behaves normally after updates, BIOS changes, driver changes, or hardware replacement.
+
+**How the score is built (kernel v2, since 2.2):**
+
+- Five sub-tests with fixed working sets, each with a different performance profile: **Integer** (Murmur3-style hashing, 4 interleaved lanes), **Float** (32x32 double matrix multiply), **Memory** (random pointer chasing over 512 KB, 4 chains), **Sort** (quicksort of 2048 ints, branch-heavy) and **Scalar** (dependent sqrt / xorshift chains, pure latency).
+- Each sub-test runs for an equal time slice, first on one thread (single-thread score), then on every logical processor (multithread score).
+- The score is the **geometric mean** of the five sub-test rates, normalised so that the calibration CPU (Intel Core i5-11400H) gets 1000 points in single-thread. Every sub-test has the same weight, so a CPU cannot win on a single code pattern; in particular the score no longer tracks clock frequency alone.
+- On hybrid CPUs the single-thread worker is kept on the fastest core class (P-cores); on systems with more than 64 logical processors the workers are spread over all processor groups.
+- The same binary (SSE2 baseline) runs on every machine; no runtime CPU dispatch.
+- Results are verified while the benchmark runs: every 128th kernel call of each thread starts from the same data and a fixed seed, and its output is compared with a reference. The check call does normal work and counts toward the score, so the overhead stays below the run-to-run noise. A result with calculation errors is marked invalid and cannot be submitted.
+
+Results recorded with the previous kernel (versions before 2.2) are in different units and are not comparable; the reference list hides them.
+
+---
+
+### CPU stability test
+
+The **Bench** page has a stability test under the benchmark (the page scrolls). It loads every logical processor and checks every result. It is meant for validating an overclock or undervolt: a CPU that is slightly unstable often keeps running but computes wrong values.
+
+- One worker thread is pinned to each logical processor, so an error is attributed to a specific thread and physical core (P/E cores are marked on hybrid CPUs).
+- Before the load starts, reference results are computed twice on one thread. During the test every work unit is compared with its reference; any difference is a calculation error.
+- Tests: **Integer** (64/128-bit multiply, rotate, divide), **Float** (double precision chaotic map and square roots: one wrong bit changes the final result completely), **AVX2 / FMA** (256-bit FMA, the heaviest power and heat load, available when the CPU supports AVX2), **Cache / RAM** (write and verify a random pattern, 4 MB per thread) and **Mixed** (all of them in turn, so the load and power keep changing).
+- Duration: presets from 5 minutes to 3 hours, **Custom** (any number of minutes) or **Unlimited** (runs until Stop, i.e. a stress test with error checking); optional stop on the first error. The settings are saved in the config.
+- WHEA-Logger events from the Windows System log (hardware errors corrected by the CPU) are counted during the run and reported separately.
+- The page shows CPU temperature, Core VID, frequency and load with their extremes during the run; temperature and VID need full mode (administrator).
+
+The benchmark and the stability test cannot run at the same time.
 
 ---
 

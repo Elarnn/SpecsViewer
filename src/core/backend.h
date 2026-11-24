@@ -3,25 +3,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define DRV_MAX 256
-
-typedef struct DriverInfo {
-  char class_name[32];
-  char device_desc[128];
-  char provider[128];
-  char version[64];
-  char date[32];
-  char inf[128];
-  char service[64];
-  char driver_file[64];
-  char image_path[260];
-  char start_type[16];
-  char service_type[32];
-  char load_order_group[64];
-  char sha256[65];
-  int is_signed;
-  char signer[128];
-} DriverInfo;
+/* Maximum number of physical CPUs (sockets) / display adapters tracked. */
+#define MAX_CPU_DEVICES 4
+#define MAX_GPU_DEVICES 4
 
 typedef struct CpuInfo {
   char model[96];
@@ -35,15 +19,20 @@ typedef struct CpuInfo {
   int cache_l1d_way, cache_l1i_way;
   int cache_l2_kb, cache_l2_x, cache_l2_way;
   int cache_l3_kb, cache_l3_x, cache_l3_way;
+
+  int package_index; /* physical package (socket) this entry describes */
 } CpuInfo;
 
 typedef struct CpuRuntime {
   double load;
-  int cpu_temp; /* CPU package temperature °C, -1 if unavailable */
+  int cpu_temp;   /* CPU package temperature °C, -1 if unavailable        */
+  double voltage; /* core voltage (VID) in volts, 0.0 if unavailable      */
+  int cur_mhz;    /* effective current frequency in MHz, 0 if unavailable */
 } CpuRuntime;
 
 typedef struct GpuInfo {
-  int is_nvidia;
+  int is_nvidia;   /* 1 = NVAPI-backed (full info + sensors), 0 = basic PnP info */
+  int nvapi_index; /* index in NVAPI physical GPU enumeration, -1 if not NVAPI  */
   char name[96];
   char vram_type[16];
   unsigned int vram_total;
@@ -80,6 +69,9 @@ typedef struct RamInfo {
   char manufacturer[64];      /* module manufacturer (WMI)      */
   char chip_manufacturer[32]; /* DRAM chip manufacturer (SPD)   */
   int mhz, module_count, channel;
+  int voltage_mv;     /* SMBIOS Type 17 "Configured Voltage" (mV), 0 = n/a */
+  int min_voltage_mv; /* SMBIOS Type 17 "Minimum Voltage"    (mV), 0 = n/a */
+  int max_voltage_mv; /* SMBIOS Type 17 "Maximum Voltage"    (mV), 0 = n/a */
 } RamInfo;
 
 typedef struct RamRuntime { unsigned long long used_mb; } RamRuntime;
@@ -117,15 +109,23 @@ typedef struct SecurityInfo {
   int cet;
 } SecurityInfo;
 
+/* Every detected CPU / GPU. SystemData.cpu / .gpu hold a copy of the
+   currently selected entry, so existing consumers keep working unchanged. */
+typedef struct DeviceList {
+  int cpu_count, cpu_sel;
+  int gpu_count, gpu_sel;
+  CpuInfo cpus[MAX_CPU_DEVICES];
+  GpuInfo gpus[MAX_GPU_DEVICES];
+} DeviceList;
+
 typedef struct SystemData {
-  CpuInfo cpu;
-  GpuInfo gpu;
+  CpuInfo cpu; /* selected CPU (== devices.cpus[devices.cpu_sel]) */
+  GpuInfo gpu; /* selected GPU (== devices.gpus[devices.gpu_sel]) */
   RamInfo ram;
   BoardInfo board;
   OsInfo os;
   SecurityInfo sec;
-  int drivers_count;
-  DriverInfo drivers[DRV_MAX];
+  DeviceList devices;
 } SystemData;
 
 typedef struct Snapshot {
@@ -143,9 +143,16 @@ typedef struct Backend {
   Snapshot back;
   double poll_hz_fast;
   double poll_hz_slow;
+  volatile long req_cpu_sel; /* pending CPU selection (index), -1 = none */
+  volatile long req_gpu_sel; /* pending GPU selection (index), -1 = none */
 } Backend;
 
-int backend_start(Backend *b);
+/* cpu_sel / gpu_sel: initial device selection (clamped to detected range). */
+int backend_start(Backend *b, int cpu_sel, int gpu_sel);
 void backend_stop(Backend *b);
 void backend_read(Backend *b, Snapshot *out);
 
+/* Request switching the active CPU / GPU. Applied asynchronously by the
+   backend thread; the new device appears in the next published snapshot. */
+void backend_select_cpu(Backend *b, int index);
+void backend_select_gpu(Backend *b, int index);

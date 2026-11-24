@@ -5,6 +5,7 @@
 #include "ui/nk_common.h"
 
 #include <windows.h>
+#include <stdio.h>
 #include <string.h>
 
 static const char *bench_phase_text(enum BenchPhase phase) {
@@ -21,10 +22,6 @@ static double bench_phase_duration(enum BenchPhase phase) {
   if (phase == BENCH_PHASE_SINGLE) return BENCH_SINGLE_SEC;
   if (phase == BENCH_PHASE_MULTI)  return BENCH_MULTI_SEC;
   return BENCH_WARMUP_SEC;
-}
-
-static const char *bench_mode_text(enum BenchMode mode) {
-  return (mode == BENCH_MODE_STRESS) ? "Stress mode" : "Timed mode";
 }
 
 static void push_disabled_btn_style(struct nk_context *ctx,
@@ -86,13 +83,76 @@ static void bench_draw_compare_chart(struct nk_context *ctx, const char *title,
     }
   }
 
-  /* Row 3: stats (2 cols: CPU% left, Workload right) */
+  /* Row 3: stats (2 cols: CPU% vs reference left, score right) */
   nk_layout_row_dynamic(ctx, 18, 2);
   if (has_ref && res->relative > 0.0)
-    nk_labelf(ctx, NK_TEXT_LEFT, "CPU: %.0f%%", res->relative * 100.0);
+    nk_labelf(ctx, NK_TEXT_LEFT, "CPU: %.0f%% of reference", res->relative * 100.0);
   else
     nk_spacer(ctx);
-  nk_labelf(ctx, NK_TEXT_RIGHT, "Workload: %.2f M units/s", res->throughput / 1000000.0);
+  if (res->throughput > 0.0)
+    nk_labelf(ctx, NK_TEXT_RIGHT, "Score: %.0f pts", res->throughput);
+  else
+    nk_label(ctx, "Score: -", NK_TEXT_RIGHT);
+
+  /* Row 4: per sub-test points (1000 = calibration CPU, single thread) */
+  nk_layout_row_dynamic(ctx, 16, 1);
+  if (res->sub_done > 0) {
+    char line[192];
+    int  pos = 0;
+    for (int i = 0; i < res->sub_done && i < BENCH_SUBTESTS; i++) {
+      int n = snprintf(line + pos, sizeof(line) - (size_t)pos, "%s%s %.0f",
+                       i ? "   " : "", bench_subtest_name(i), res->sub_pts[i]);
+      if (n < 0 || pos + n >= (int)sizeof(line)) break;
+      pos += n;
+    }
+    nk_label(ctx, line, NK_TEXT_CENTERED);
+  } else {
+    nk_spacer(ctx);
+  }
+}
+
+/* "Your processor", the reference selector and the reference score. The score
+   row is always reserved so the charts below never shift. */
+static void bench_draw_reference_rows(struct nk_context *ctx, const struct AppState *S,
+                                      int running) {
+  nk_layout_row_template_begin(ctx, 26);
+  nk_layout_row_template_push_static(ctx, 140);
+  nk_layout_row_template_push_dynamic(ctx);
+  nk_layout_row_template_end(ctx);
+
+  nk_label(ctx, "Your processor:", NK_TEXT_LEFT);
+  nk_label(ctx, S->snap.data.cpu.model[0] ? S->snap.data.cpu.model : "-",
+           NK_TEXT_CENTERED);
+
+  nk_label(ctx, "Reference CPU:", NK_TEXT_LEFT);
+
+  int ref_count = bench_refs_count();
+  int selected  = bench_refs_selected();
+  {
+    const char *items[BENCH_MAX_REFS + 1];
+    items[0] = "-- None --";
+    int shown = ref_count > BENCH_MAX_REFS ? BENCH_MAX_REFS : ref_count;
+    for (int i = 0; i < shown; ++i) {
+      const BenchReference *r = bench_ref_get(i);
+      items[i + 1] = r ? r->cpu_name : "";
+    }
+    int combo_sel = (selected < 0) ? 0 : selected + 1;
+    int picked = nk_combo(ctx, items, shown + 1, combo_sel, 22, nk_vec2(460, 240));
+    if (!running) {
+      int new_sel = (picked == 0) ? -1 : picked - 1;
+      if (new_sel != selected)
+        bench_refs_select(new_sel);
+    }
+  }
+
+  const BenchReference *curr_ref = (selected >= 0) ? bench_ref_get(selected) : NULL;
+  nk_layout_row_dynamic(ctx, 18, 1);
+  if (curr_ref)
+    nk_labelf(ctx, NK_TEXT_LEFT,
+              "Reference score: single %.0f pts, multi %.0f pts",
+              curr_ref->single_throughput, curr_ref->multi_throughput);
+  else
+    nk_spacer(ctx);
 }
 
 void ui_page_bench(struct nk_context *ctx, const struct AppState *S) {
@@ -109,44 +169,68 @@ void ui_page_bench(struct nk_context *ctx, const struct AppState *S) {
 
   bench_refs_load();
 
+  /* a result with failed checks was computed wrongly: never submit it */
   int can_submit = !st.running && !st.cancelled &&
-                   st.mode  == BENCH_MODE_TIMED &&
                    st.phase == BENCH_PHASE_DONE &&
+                   st.errors == 0 &&
                    st.single.throughput > 0.0 &&
                    st.multi.throughput  > 0.0;
 
   int has_ref_now = (bench_refs_selected() >= 0);
-  /* chart always: title(22)+bar(18)+stats(18)=58px; 2 status rows always reserved */
-  float g_h = 318.0f;
+  /* reference rows (processor, reference, its score) + 2 status rows +
+     2 charts (title 22 + bar 18 + stats 18 + breakdown 16) + buttons */
+  float g_h = 442.0f;
+
+  /* The page scrolls: benchmark, then the stability test. */
+  {
+    struct nk_rect region = nk_window_get_content_region(ctx);
+    float page_h = region.h - 2.0f * ctx->style.window.group_padding.y;
+    nk_layout_row_dynamic(ctx, page_h > 100.0f ? page_h : 100.0f, 1);
+  }
+  if (!nk_group_begin(ctx, "BenchPage", 0))
+    return;
 
   nk_layout_row_dynamic(ctx, g_h, 1);
   if (nk_group_begin(ctx, "CPU benchmark",
                      NK_WINDOW_TITLE | NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
 
+    /* ── Processor and reference (the charts compare against it) ────────── */
+    bench_draw_reference_rows(ctx, S, st.running);
+
+    nk_layout_row_dynamic(ctx, 6, 1);
+    nk_spacer(ctx);
+
     /* ── Status rows (always 2 rows reserved to prevent layout shift) ── */
     nk_layout_row_dynamic(ctx, 20, 1);
-    if (st.running)
-      nk_labelf(ctx, NK_TEXT_LEFT, " %s (%s)",
-                bench_phase_text(st.phase), bench_mode_text(st.mode));
+    if (st.errors > 0 && (st.running || st.phase == BENCH_PHASE_DONE))
+      nk_labelf_colored(ctx, NK_TEXT_LEFT, nk_rgb(235, 80, 80),
+                        " %d calculation error(s): the result is invalid and cannot be submitted",
+                        st.errors);
+    else if (st.running)
+      nk_labelf(ctx, NK_TEXT_LEFT, " %s", bench_phase_text(st.phase));
     else if (st.cancelled)
       nk_label(ctx, " Benchmark interrupted", NK_TEXT_LEFT);
+    else if (st.phase == BENCH_PHASE_DONE)
+      nk_label_colored(ctx, " Completed, all results verified", NK_TEXT_LEFT, nk_rgb(80, 200, 120));
     else
       nk_spacer(ctx);
 
     nk_layout_row_dynamic(ctx, 20, 1);
     if (st.running) {
-      if (st.mode == BENCH_MODE_STRESS) {
+      const char *sub = (st.subtest >= 0) ? bench_subtest_name(st.subtest) : "";
+      double phase_dur = bench_phase_duration(st.phase);
+      double p = (phase_dur > 0.0) ? (st.elapsed_sec / phase_dur) : 0.0;
+      if (p < 0.0) p = 0.0;
+      if (p > 1.0) p = 1.0;
+      if (st.subtest >= 0)
         nk_labelf(ctx, NK_TEXT_LEFT,
-                  " Stress running: %.1f sec (until Stop)", st.elapsed_sec);
-      } else {
-        double phase_dur = bench_phase_duration(st.phase);
-        double p = (phase_dur > 0.0) ? (st.elapsed_sec / phase_dur) : 0.0;
-        if (p < 0.0) p = 0.0;
-        if (p > 1.0) p = 1.0;
+                  " Progress: %.0f%%  (%.1f / %.0f sec)   %d/%d %s",
+                  p * 100.0, st.elapsed_sec, phase_dur,
+                  st.subtest + 1, BENCH_SUBTESTS, sub);
+      else
         nk_labelf(ctx, NK_TEXT_LEFT,
                   " Progress: %.0f%%  (%.1f / %.0f sec)",
                   p * 100.0, st.elapsed_sec, phase_dur);
-      }
     } else {
       nk_spacer(ctx);
     }
@@ -167,15 +251,13 @@ void ui_page_bench(struct nk_context *ctx, const struct AppState *S) {
     nk_layout_row_dynamic(ctx, 8, 1);
     nk_spacer(ctx);
 
-    /* ── Button row: [Start/Stop] | [Stress] | [Submit] ────────────────── */
+    /* ── Button row: [Start/Stop] | [Submit] ────────────────────────────── */
     struct nk_style_button saved_style;
 
-    /* template: dyn | 155 | 6 | 115 | 6 | 155 | dyn */
+    /* template: dyn | 155 | 6 | 155 | dyn */
     nk_layout_row_template_begin(ctx, 28);
     nk_layout_row_template_push_dynamic(ctx);
     nk_layout_row_template_push_static(ctx, 155);
-    nk_layout_row_template_push_static(ctx,   6);
-    nk_layout_row_template_push_static(ctx, 115);
     nk_layout_row_template_push_static(ctx,   6);
     nk_layout_row_template_push_static(ctx, 155);
     nk_layout_row_template_push_dynamic(ctx);
@@ -184,9 +266,14 @@ void ui_page_bench(struct nk_context *ctx, const struct AppState *S) {
     nk_spacing(ctx, 1);
 
     /* Btn 1: Start benchmark / Stop */
+    const int stab_busy = (int)M->stab.running;   /* stability test owns the CPU */
     if (st.running) {
       if (nk_button_label(ctx, "Stop"))
         bench_stop(&M->bench);
+    } else if (stab_busy) {
+      push_disabled_btn_style(ctx, &saved_style);
+      nk_button_label(ctx, "Stability busy");
+      ctx->style.button = saved_style;
     } else {
       if (nk_button_label(ctx, "Start benchmark")) {
         InterlockedExchange(&M->bench_sync.submit_status, (LONG)BENCH_SUBMIT_IDLE);
@@ -196,21 +283,7 @@ void ui_page_bench(struct nk_context *ctx, const struct AppState *S) {
 
     nk_spacing(ctx, 1);
 
-    /* Btn 2: Stress CPU (disabled while running) */
-    if (st.running) {
-      push_disabled_btn_style(ctx, &saved_style);
-      nk_button_label(ctx, "Stress CPU");
-      ctx->style.button = saved_style;
-    } else {
-      if (nk_button_label(ctx, "Stress CPU")) {
-        InterlockedExchange(&M->bench_sync.submit_status, (LONG)BENCH_SUBMIT_IDLE);
-        bench_start_stress(&M->bench);
-      }
-    }
-
-    nk_spacing(ctx, 1);
-
-    /* Btn 3: Submit to server */
+    /* Btn 2: Submit to server */
     if (submit_st == BENCH_SUBMIT_PENDING) {
       nk_label(ctx, "Submitting...", NK_TEXT_CENTERED);
     } else if (submit_st == BENCH_SUBMIT_OK) {
@@ -219,12 +292,10 @@ void ui_page_bench(struct nk_context *ctx, const struct AppState *S) {
       const char *lbl = (submit_st == BENCH_SUBMIT_ERROR)
                         ? "Retry submit" : "Submit to server";
       if (nk_button_label(ctx, lbl)) {
-        SYSTEM_INFO si;
-        GetSystemInfo(&si);
         bench_sync_submit(&M->bench_sync,
           S->snap.data.cpu.model,
-          st.single.throughput, st.multi.throughput,
-          (int)si.dwNumberOfProcessors);
+          &st.single, &st.multi,
+          bench_logical_cpu_count());
       }
     } else {
       push_disabled_btn_style(ctx, &saved_style);
@@ -240,49 +311,8 @@ void ui_page_bench(struct nk_context *ctx, const struct AppState *S) {
     nk_group_end(ctx);
   }
 
-  /* ── Reference selector ─────────────────────────────────────────────────── */
-  nk_layout_row_dynamic(ctx, 480, 1);
+  /* ── Stability test ─────────────────────────────────────────────────────── */
+  ui_stability_group(ctx, M);
 
-  if (nk_group_begin(ctx, "CPU ref", NK_WINDOW_BORDER)) {
-    nk_layout_row_template_begin(ctx, 26);
-    nk_layout_row_template_push_static(ctx, 140);
-    nk_layout_row_template_push_dynamic(ctx);
-    nk_layout_row_template_end(ctx);
-
-    nk_label(ctx, "Your processor:", NK_TEXT_LEFT);
-    nk_label(ctx, S->snap.data.cpu.model[0] ? S->snap.data.cpu.model : "-",
-             NK_TEXT_CENTERED);
-
-    nk_label(ctx, "Reference CPU:", NK_TEXT_LEFT);
-
-    int ref_count = bench_refs_count();
-    int selected  = bench_refs_selected();
-    {
-      const char *items[BENCH_MAX_REFS + 1];
-      items[0] = "-- None --";
-      int shown = ref_count > BENCH_MAX_REFS ? BENCH_MAX_REFS : ref_count;
-      for (int i = 0; i < shown; ++i) {
-        const BenchReference *r = bench_ref_get(i);
-        items[i + 1] = r ? r->cpu_name : "";
-      }
-      int combo_sel = (selected < 0) ? 0 : selected + 1;
-      int picked = nk_combo(ctx, items, shown + 1, combo_sel, 22, nk_vec2(460, 240));
-      if (!st.running) {
-        int new_sel = (picked == 0) ? -1 : picked - 1;
-        if (new_sel != selected)
-          bench_refs_select(new_sel);
-      }
-    }
-
-    const BenchReference *curr_ref = (selected >= 0) ? bench_ref_get(selected) : NULL;
-    if (curr_ref) {
-      nk_layout_row_dynamic(ctx, 18, 1);
-      nk_labelf(ctx, NK_TEXT_LEFT,
-                "Reference values: single %.2f M units/s, multi %.2f M units/s",
-                curr_ref->single_throughput / 1000000.0,
-                curr_ref->multi_throughput  / 1000000.0);
-    }
-
-    nk_group_end(ctx);
-  }
+  nk_group_end(ctx);   /* BenchPage */
 }

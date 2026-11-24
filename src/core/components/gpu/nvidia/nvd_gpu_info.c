@@ -4,7 +4,32 @@
 #include <string.h>
 
 
-static int nvd_init_first_gpu(NvPhysicalGpuHandle *out_gpu) {
+/* Index of the NVAPI physical GPU that all get_nvd_gpu_* functions operate
+   on. Set by the backend when the user switches the active graphics card. */
+static int g_nvd_index = 0;
+
+void nvd_set_active_gpu(int index) { g_nvd_index = (index < 0) ? 0 : index; }
+
+int get_nvd_gpu_count(void) {
+  if (!nvapi_dyn_load())
+    return 0;
+
+  if (pNvAPI_Initialize() != NVAPI_OK) {
+    nvapi_dyn_unload();
+    return 0;
+  }
+
+  NvPhysicalGpuHandle gpus[NVAPI_MAX_PHYSICAL_GPUS] = {0};
+  NvU32 count = 0;
+  if (pNvAPI_EnumPhysicalGPUs(gpus, &count) != NVAPI_OK)
+    count = 0;
+
+  pNvAPI_Unload();
+  nvapi_dyn_unload();
+  return (int)count;
+}
+
+static int nvd_init_active_gpu(NvPhysicalGpuHandle *out_gpu) {
   if (!out_gpu)
     return 0;
 
@@ -25,7 +50,11 @@ static int nvd_init_first_gpu(NvPhysicalGpuHandle *out_gpu) {
     return 0;
   }
 
-  *out_gpu = gpus[0];
+  NvU32 idx = (NvU32)g_nvd_index;
+  if (idx >= count)
+    idx = 0;
+
+  *out_gpu = gpus[idx];
   return 1;
 }
 
@@ -40,7 +69,7 @@ int get_nvd_gpu_name(char *out, size_t out_sz) {
 
   NvPhysicalGpuHandle gpu;
 
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   NvAPI_ShortString name = {0};
@@ -70,7 +99,7 @@ int get_nvd_gpu_device_id(unsigned int *vendor_id, unsigned int *device_id,
     return 0;
 
   NvPhysicalGpuHandle gpu;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   NvU32 dev_id = 0;
@@ -132,7 +161,7 @@ int get_nvd_gpu_core_base_boost_mhz(unsigned int *out_base_mhz,
     return 0;
 
   NvPhysicalGpuHandle gpu;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   /* Эти enum’ы обычно определены в nvapi.h */
@@ -151,7 +180,7 @@ int get_nvd_gpu_mem_mhz(unsigned int *out_base_mhz) {
   *out_base_mhz = 0;
 
   NvPhysicalGpuHandle gpu;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   NV_GPU_CLOCK_FREQUENCIES f;
@@ -225,7 +254,7 @@ int get_nvd_gpu_vram_type(char *out, size_t out_sz) {
   out[0] = '\0';
 
   NvPhysicalGpuHandle gpu;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   if (!pNvAPI_GPU_GetRamType) {
@@ -263,7 +292,7 @@ int get_nvd_gpu_pcie_lanes(unsigned *out_lanes) {
     return 0; /* не экспортнули/не загрузили указатель */
 
   NvPhysicalGpuHandle gpu = NULL;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   NvU32 w = 0;
@@ -293,7 +322,7 @@ int get_nvd_gpu_core_temp(int *out_temp_c) {
   *out_temp_c = 0;
 
   NvPhysicalGpuHandle gpu;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   NV_GPU_THERMAL_SETTINGS ts;
@@ -343,7 +372,7 @@ int get_nvd_gpu_mem_temp(int *out_temp_c) {
   *out_temp_c = 0;
 
   NvPhysicalGpuHandle gpu;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   NV_GPU_THERMAL_SETTINGS ts;
@@ -408,7 +437,7 @@ int get_nvd_gpu_current_core_mem_mhz(unsigned int *out_core_mhz,
     return 0;
 
   NvPhysicalGpuHandle gpu;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   NV_GPU_CLOCK_FREQUENCIES f;
@@ -659,7 +688,7 @@ int get_nvd_gpu_arch_info(char *arch, size_t arch_sz,
     return 0;
 
   NvPhysicalGpuHandle gpu;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   NV_GPU_ARCH_INFO info;
@@ -694,7 +723,7 @@ int get_nvd_gpu_vram_snapshot(unsigned *out_used_mb, unsigned *out_total_mb,
     return 0;
 
   NvPhysicalGpuHandle gpu;
-  if (!nvd_init_first_gpu(&gpu))
+  if (!nvd_init_active_gpu(&gpu))
     return 0;
 
   NV_DISPLAY_DRIVER_MEMORY_INFO mem;

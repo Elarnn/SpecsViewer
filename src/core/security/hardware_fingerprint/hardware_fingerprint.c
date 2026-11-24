@@ -11,11 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct NormDriver {
-  char file[96], service[96], version[96], sha256[96];
-  int is_signed;
-} NormDriver;
-
 typedef struct NormProfile {
   char cpu_vendor[32], cpu_model[128], cpu_instructions[256];
   int cpu_cores, cpu_threads, cpu_base_mhz, cpu_family, cpu_model_id,
@@ -33,8 +28,6 @@ typedef struct NormProfile {
   long long ram_total_mb;
   int ram_mhz, ram_module_count, ram_channel;
   int tpm, secure_boot, uefi, bitlocker, vbs, hvci, nx, smep, cet, ftpm, ptt;
-  int drivers_count;
-  NormDriver drivers[DRV_MAX];
 } NormProfile;
 
 static void appendf(char *dst, size_t cap, const char *fmt, ...) {
@@ -83,35 +76,26 @@ static void detect_cpu_vendor(char *dst, size_t dst_sz, const char *cpu_model) {
     snprintf(dst, dst_sz, "unknown");
 }
 
-static int cmp_norm_driver(const void *a, const void *b) {
-  const NormDriver *x = (const NormDriver *)a, *y = (const NormDriver *)b;
-  int c = strcmp(x->file, y->file);
-  if (c)
-    return c;
-  c = strcmp(x->service, y->service);
-  if (c)
-    return c;
-  c = strcmp(x->version, y->version);
-  if (c)
-    return c;
-  c = strcmp(x->sha256, y->sha256);
-  if (c)
-    return c;
-  return x->is_signed - y->is_signed;
-}
-
 static void normalize_snapshot(const Snapshot *s, NormProfile *n) {
   memset(n, 0, sizeof(*n));
-  normalize_text(n->cpu_model, sizeof(n->cpu_model), s->data.cpu.model);
+
+  /* Always fingerprint the primary (first) CPU / GPU so the result does not
+     depend on which device is currently selected in the UI. */
+  const CpuInfo *cpu = (s->data.devices.cpu_count > 0)
+                           ? &s->data.devices.cpus[0] : &s->data.cpu;
+  const GpuInfo *gpu = (s->data.devices.gpu_count > 0)
+                           ? &s->data.devices.gpus[0] : &s->data.gpu;
+
+  normalize_text(n->cpu_model, sizeof(n->cpu_model), cpu->model);
   detect_cpu_vendor(n->cpu_vendor, sizeof(n->cpu_vendor), n->cpu_model);
   normalize_text(n->cpu_instructions, sizeof(n->cpu_instructions),
-                 s->data.cpu.instructions);
-  n->cpu_cores = s->data.cpu.cores;
-  n->cpu_threads = s->data.cpu.threads;
-  n->cpu_base_mhz = s->data.cpu.base_mhz;
-  n->cpu_family = s->data.cpu.family;
-  n->cpu_model_id = s->data.cpu.model_id;
-  n->cpu_stepping = s->data.cpu.stepping;
+                 cpu->instructions);
+  n->cpu_cores = cpu->cores;
+  n->cpu_threads = cpu->threads;
+  n->cpu_base_mhz = cpu->base_mhz;
+  n->cpu_family = cpu->family;
+  n->cpu_model_id = cpu->model_id;
+  n->cpu_stepping = cpu->stepping;
 
   normalize_text(n->bios_vendor, sizeof(n->bios_vendor), s->data.board.bios_vendor);
   normalize_text(n->bios_version, sizeof(n->bios_version), s->data.board.bios_version);
@@ -127,17 +111,17 @@ static void normalize_snapshot(const Snapshot *s, NormProfile *n) {
   n->is_hypervisor = s->data.os.is_hypervisor ? 1 : 0;
   normalize_text(n->vm_vendor, sizeof(n->vm_vendor), s->data.os.vm_vendor);
 
-  normalize_text(n->gpu_name, sizeof(n->gpu_name), s->data.gpu.name);
-  normalize_text(n->vram_type, sizeof(n->vram_type), s->data.gpu.vram_type);
-  n->gpu_ven = (int)s->data.gpu.ven;
-  n->gpu_dev = (int)s->data.gpu.dev;
-  n->gpu_subsys = (int)s->data.gpu.subsys;
-  n->gpu_rev = (int)s->data.gpu.rev;
-  n->vram_total = s->data.gpu.vram_total;
-  n->gpu_clock_base_mhz = s->data.gpu.clock_base_mhz;
-  n->gpu_clock_boost_mhz = s->data.gpu.clock_boost_mhz;
-  n->gpu_mem_mhz = s->data.gpu.mem_mhz;
-  n->gpu_pci_lanes = s->data.gpu.pci_lanes;
+  normalize_text(n->gpu_name, sizeof(n->gpu_name), gpu->name);
+  normalize_text(n->vram_type, sizeof(n->vram_type), gpu->vram_type);
+  n->gpu_ven = (int)gpu->ven;
+  n->gpu_dev = (int)gpu->dev;
+  n->gpu_subsys = (int)gpu->subsys;
+  n->gpu_rev = (int)gpu->rev;
+  n->vram_total = gpu->vram_total;
+  n->gpu_clock_base_mhz = gpu->clock_base_mhz;
+  n->gpu_clock_boost_mhz = gpu->clock_boost_mhz;
+  n->gpu_mem_mhz = gpu->mem_mhz;
+  n->gpu_pci_lanes = gpu->pci_lanes;
 
   normalize_text(n->ram_type, sizeof(n->ram_type), s->data.ram.type);
   n->ram_total_mb = (long long)s->data.ram.total_mb;
@@ -156,27 +140,13 @@ static void normalize_snapshot(const Snapshot *s, NormProfile *n) {
   n->cet = (s->data.sec.cet == 1);
   n->ftpm = (s->data.sec.ftpm == 1);
   n->ptt = (s->data.sec.ptt == 1);
-
-  n->drivers_count = s->data.drivers_count > DRV_MAX ? DRV_MAX : s->data.drivers_count;
-  for (int i = 0; i < n->drivers_count; ++i) {
-    normalize_text(n->drivers[i].file, sizeof(n->drivers[i].file),
-                   s->data.drivers[i].driver_file);
-    normalize_text(n->drivers[i].service, sizeof(n->drivers[i].service),
-                   s->data.drivers[i].service);
-    normalize_text(n->drivers[i].version, sizeof(n->drivers[i].version),
-                   s->data.drivers[i].version);
-    normalize_text(n->drivers[i].sha256, sizeof(n->drivers[i].sha256),
-                   s->data.drivers[i].sha256);
-    n->drivers[i].is_signed = s->data.drivers[i].is_signed ? 1 : 0;
-  }
-  qsort(n->drivers, (size_t)n->drivers_count, sizeof(n->drivers[0]), cmp_norm_driver);
 }
 
 static void build_sections(const NormProfile *n, char *bios, size_t bios_sz,
                            char *board, size_t board_sz, char *cpu,
                            size_t cpu_sz, char *gpu, size_t gpu_sz, char *os,
                            size_t os_sz, char *ram, size_t ram_sz, char *sec,
-                           size_t sec_sz, char *drivers, size_t drv_sz) {
+                           size_t sec_sz) {
   snprintf(bios, bios_sz, "{\"vendor\":\"%s\",\"version\":\"%s\"}",
            n->bios_vendor, n->bios_version);
   snprintf(board, board_sz,
@@ -208,18 +178,6 @@ static void build_sections(const NormProfile *n, char *bios, size_t bios_sz,
            n->secure_boot ? "true" : "false", n->smep ? "true" : "false",
            n->tpm ? "true" : "false", n->uefi ? "true" : "false",
            n->vbs ? "true" : "false");
-
-  drivers[0] = '\0';
-  appendf(drivers, drv_sz, "[");
-  for (int i = 0; i < n->drivers_count; ++i) {
-    if (i)
-      appendf(drivers, drv_sz, ",");
-    appendf(drivers, drv_sz,
-            "{\"file\":\"%s\",\"service\":\"%s\",\"sha256\":\"%s\",\"signed\":%s,\"version\":\"%s\"}",
-            n->drivers[i].file, n->drivers[i].service, n->drivers[i].sha256,
-            n->drivers[i].is_signed ? "true" : "false", n->drivers[i].version);
-  }
-  appendf(drivers, drv_sz, "]");
 }
 
 static void build_profile_json(const NormProfile *n, char *out, size_t out_sz,
@@ -227,13 +185,12 @@ static void build_profile_json(const NormProfile *n, char *out, size_t out_sz,
                                size_t board_sz, char *cpu, size_t cpu_sz,
                                char *gpu, size_t gpu_sz, char *os,
                                size_t os_sz, char *ram, size_t ram_sz,
-                               char *sec, size_t sec_sz, char *drivers,
-                               size_t drv_sz) {
+                               char *sec, size_t sec_sz) {
   build_sections(n, bios, bios_sz, board, board_sz, cpu, cpu_sz, gpu, gpu_sz,
-                 os, os_sz, ram, ram_sz, sec, sec_sz, drivers, drv_sz);
+                 os, os_sz, ram, ram_sz, sec, sec_sz);
   snprintf(out, out_sz,
-           "{\"bios\":%s,\"board\":%s,\"cpu\":%s,\"gpu\":%s,\"os\":%s,\"ram\":%s,\"security\":%s,\"drivers\":%s}",
-           bios, board, cpu, gpu, os, ram, sec, drivers);
+           "{\"bios\":%s,\"board\":%s,\"cpu\":%s,\"gpu\":%s,\"os\":%s,\"ram\":%s,\"security\":%s}",
+           bios, board, cpu, gpu, os, ram, sec);
 }
 
 static int sha256_hex_utf8(const char *text, char out_hex[65]) {
@@ -401,21 +358,20 @@ int hardware_fingerprint_build(const Snapshot *snap, char *out, size_t out_sz) {
   char *profile = (char *)malloc(150 * 1024), *final_json = (char *)malloc(180 * 1024);
   char *bios = (char *)malloc(4096), *board = (char *)malloc(4096), *cpu = (char *)malloc(8192),
        *gpu = (char *)malloc(8192), *os = (char *)malloc(8192), *ram = (char *)malloc(4096),
-       *sec = (char *)malloc(4096), *drivers = (char *)malloc(100 * 1024);
-  if (!profile || !final_json || !bios || !board || !cpu || !gpu || !os || !ram || !sec || !drivers) {
+       *sec = (char *)malloc(4096);
+  if (!profile || !final_json || !bios || !board || !cpu || !gpu || !os || !ram || !sec) {
     snprintf(out, out_sz, "Save failed.");
-    free(profile); free(final_json); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec); free(drivers);
+    free(profile); free(final_json); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec);
     return -1;
   }
 
   build_profile_json(&n, profile, 150 * 1024, bios, 4096, board, 4096, cpu,
-                     8192, gpu, 8192, os, 8192, ram, 4096, sec, 4096, drivers,
-                     100 * 1024);
+                     8192, gpu, 8192, os, 8192, ram, 4096, sec, 4096);
 
   char hash[65];
   if (!sha256_hex_utf8(profile, hash)) {
     snprintf(out, out_sz, "Save failed.");
-    free(profile); free(final_json); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec); free(drivers);
+    free(profile); free(final_json); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec);
     return -1;
   }
 
@@ -426,7 +382,7 @@ int hardware_fingerprint_build(const Snapshot *snap, char *out, size_t out_sz) {
   int rc = save_dialog_write(final_json);
   snprintf(out, out_sz, rc == 1 ? "Hardware fingerprint saved" : (rc == 0 ? "Save canceled" : "Save failed"));
 
-  free(profile); free(final_json); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec); free(drivers);
+  free(profile); free(final_json); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec);
   return rc == 1 ? 1 : (rc == 0 ? 0 : -1);
 }
 
@@ -450,33 +406,32 @@ int hardware_fingerprint_compare(const Snapshot *snap, char *out, size_t out_sz)
   char *profile = (char *)malloc(150 * 1024);
   char *bios = (char *)malloc(4096), *board = (char *)malloc(4096), *cpu = (char *)malloc(8192),
        *gpu = (char *)malloc(8192), *os = (char *)malloc(8192), *ram = (char *)malloc(4096),
-       *sec = (char *)malloc(4096), *drivers = (char *)malloc(100 * 1024);
-  if (!profile || !bios || !board || !cpu || !gpu || !os || !ram || !sec || !drivers) {
-    free(file_json); free(profile); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec); free(drivers);
+       *sec = (char *)malloc(4096);
+  if (!profile || !bios || !board || !cpu || !gpu || !os || !ram || !sec) {
+    free(file_json); free(profile); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec);
     snprintf(out, out_sz, "Memory error");
     return -1;
   }
 
   build_profile_json(&n, profile, 150 * 1024, bios, 4096, board, 4096, cpu,
-                     8192, gpu, 8192, os, 8192, ram, 4096, sec, 4096, drivers,
-                     100 * 1024);
+                     8192, gpu, 8192, os, 8192, ram, 4096, sec, 4096);
 
   char current_hash[65], file_hash[65];
   if (!sha256_hex_utf8(profile, current_hash) ||
       !extract_string_field(file_json, "\"value\"", file_hash, sizeof(file_hash))) {
     snprintf(out, out_sz, "Invalid hardware fingerprint file");
-    free(file_json); free(profile); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec); free(drivers);
+    free(file_json); free(profile); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec);
     return -1;
   }
 
   if (strcmp(current_hash, file_hash) == 0) {
     snprintf(out, out_sz, "Hardware fingerprint matched");
-    free(file_json); free(profile); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec); free(drivers);
+    free(file_json); free(profile); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec);
     return 1;
   }
 
   char fbios[8192], fboard[8192], fcpu[16384], fgpu[16384], fos[16384],
-      fram[8192], fsec[8192], fdrv[120000];
+      fram[8192], fsec[8192];
   int mbios = !extract_section_value(file_json, "\"bios\"", fbios, sizeof(fbios)) || strcmp(fbios, bios);
   int mboard = !extract_section_value(file_json, "\"board\"", fboard, sizeof(fboard)) || strcmp(fboard, board);
   int mcpu = !extract_section_value(file_json, "\"cpu\"", fcpu, sizeof(fcpu)) || strcmp(fcpu, cpu);
@@ -484,7 +439,6 @@ int hardware_fingerprint_compare(const Snapshot *snap, char *out, size_t out_sz)
   int mos = !extract_section_value(file_json, "\"os\"", fos, sizeof(fos)) || strcmp(fos, os);
   int mram = !extract_section_value(file_json, "\"ram\"", fram, sizeof(fram)) || strcmp(fram, ram);
   int msec = !extract_section_value(file_json, "\"security\"", fsec, sizeof(fsec)) || strcmp(fsec, sec);
-  int mdrv = !extract_section_value(file_json, "\"drivers\"", fdrv, sizeof(fdrv)) || strcmp(fdrv, drivers);
 
   char mismatch[512] = {0};
   if (mbios) appendf(mismatch, sizeof(mismatch), "bios ");
@@ -494,13 +448,12 @@ int hardware_fingerprint_compare(const Snapshot *snap, char *out, size_t out_sz)
   if (mos) appendf(mismatch, sizeof(mismatch), "os ");
   if (mram) appendf(mismatch, sizeof(mismatch), "ram ");
   if (msec) appendf(mismatch, sizeof(mismatch), "security ");
-  if (mdrv) appendf(mismatch, sizeof(mismatch), "drivers ");
 
   if (!mismatch[0])
     snprintf(out, out_sz, "Hardware fingerprint mismatch");
   else
     snprintf(out, out_sz, "Mismatch in: %s", mismatch);
 
-  free(file_json); free(profile); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec); free(drivers);
+  free(file_json); free(profile); free(bios); free(board); free(cpu); free(gpu); free(os); free(ram); free(sec);
   return -1;
 }

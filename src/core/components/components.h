@@ -17,6 +17,25 @@ int get_cpu_base_mhz(int *base_mhz);
 int get_cpu_instructions(char *out, size_t n);
 int get_cpu_family_model_stepping(int out[3]);
 void get_cpu_load(Snapshot *s);
+/* Effective current frequency (nominal x %performance via PDH), 0 = n/a.
+   Needs two polls before it returns a value. */
+int  get_cpu_current_mhz(int base_mhz);
+void cpu_current_mhz_shutdown(void);
+
+/* Multi-package (socket) support.
+   CPUID describes the package the calling thread runs on, so per-package
+   collection pins the thread to that package first (cpu_pin_to_package) and
+   restores the previous affinity afterwards (cpu_unpin).                   */
+typedef struct CpuAffinitySave {
+  unsigned short     group;
+  unsigned long long mask;
+  int                valid;
+} CpuAffinitySave;
+
+int  get_cpu_package_count(void);
+int  get_cpu_package_core_thread_count(int pkg, int *out_cores, int *out_threads);
+int  cpu_pin_to_package(int pkg, CpuAffinitySave *saved);
+void cpu_unpin(const CpuAffinitySave *saved);
 
 /* ===============
      RAM INFO
@@ -32,12 +51,22 @@ int get_ram_module_count(void);
 int get_ram_channel_count_smbios(void);
 int get_ram_channel_count_smbios_t17(void); /* SMBIOS Type 17 device locator */
 int get_ram_channel_count_wr0(void);        /* WinRing0: Intel MCHBAR MMIO   */
+int get_ram_voltage_smbios_mv(int *configured_mv, int *min_mv, int *max_mv);
 
 /* ===============
   GPU INFO
 ===============*/
 
 int is_gpu_nvidia_by_pci_vendor(void);
+/* Vendor-agnostic enumeration of physical (PCI) display adapters via SetupAPI:
+   name, PCI IDs, driver version/date. is_nvidia = 0, nvapi_index = -1.
+   skip_nvidia = 1 leaves out VEN_10DE devices (already covered by NVAPI). */
+int  enum_basic_display_adapters(GpuInfo *out, int max_out, int skip_nvidia);
+
+/* NVAPI: number of physical GPUs, and which one get_nvd_gpu_* operate on. */
+int  get_nvd_gpu_count(void);
+void nvd_set_active_gpu(int index);
+
 int get_nvd_gpu_name(char *out, size_t out_sz);
 int get_nvd_gpu_vram_total_mb(unsigned int *out_mb);
 int get_nvd_gpu_device_id(

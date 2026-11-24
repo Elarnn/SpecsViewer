@@ -31,13 +31,28 @@ void ui_page_ram(struct nk_context *ctx, const struct AppState *S) {
       nk_layout_row_template_end(ctx);
 
       nk_label(ctx, "Memory used / total", NK_TEXT_RIGHT);
-      snprintf(buf, sizeof(buf), "%d mb / %d mb", S->snap.ram_rt.used_mb,
+      snprintf(buf, sizeof(buf), "%llu mb / %llu mb", S->snap.ram_rt.used_mb,
                S->snap.data.ram.total_mb);
       nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
+
+      /* Type / frequency + DRAM voltage configured by the firmware (SMBIOS) */
+      nk_layout_row_template_begin(ctx, 26);
+      nk_layout_row_template_push_static(ctx, 140);
+      nk_layout_row_template_push_dynamic(ctx);
+      nk_layout_row_template_push_static(ctx, 70);
+      nk_layout_row_template_push_static(ctx, 90);
+      nk_layout_row_template_end(ctx);
 
       nk_label(ctx, "Type / Frequency:", NK_TEXT_RIGHT);
       snprintf(buf, sizeof(buf), "%s / %d MHz", S->snap.data.ram.type,
                S->snap.data.ram.mhz);
+      nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
+
+      nk_label(ctx, "Voltage:", NK_TEXT_RIGHT);
+      if (S->snap.data.ram.voltage_mv > 0)
+        snprintf(buf, sizeof(buf), "%.2f V", S->snap.data.ram.voltage_mv / 1000.0);
+      else
+        snprintf(buf, sizeof(buf), "N/A");
       nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
       nk_layout_row_template_begin(ctx, 26);

@@ -8,7 +8,9 @@
 int ui_shutter(struct nk_context   *ctx,
                const char          *panel_id,
                float                anchor_x,
+               float                anchor_y,
                float                panel_w,
+               struct nk_rect       exclude,
                int                 *open,
                float               *anim,
                double              *last_t,
@@ -44,12 +46,12 @@ int ui_shutter(struct nk_context   *ctx,
     if (anim_h < 4.0f)
         return -1;
 
-    float py = (float)TITLEBAR_H;
+    float py = anchor_y;
 
-    /* close on outside click (ignore clicks inside the titlebar — handled by toggle button) */
+    /* close on outside click (ignore clicks inside `exclude` — the toggle widget) */
     if (*open
         && nk_input_is_mouse_pressed(&ctx->input, NK_BUTTON_LEFT)
-        && ctx->input.mouse.pos.y >= (float)TITLEBAR_H
+        && !nk_input_is_mouse_hovering_rect(&ctx->input, exclude)
         && !nk_input_is_mouse_hovering_rect(&ctx->input,
                nk_rect(anchor_x, py, panel_w, target_h)))
         *open = 0;

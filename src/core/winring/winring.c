@@ -1,5 +1,6 @@
 #include "winring0.h"
 #include <stdio.h>
+#include <string.h>
 #include <intrin.h>
 
 /* ── WinRing0 export signatures (internal only) ──────────────────────────── */
@@ -16,6 +17,8 @@ int     g_ready      = 0;
 int     g_tjmax      = 100;
 int     g_cpu_vendor = CPU_VENDOR_UNKNOWN;
 int     g_cpu_family = 0;
+int     g_cpu_model  = 0;
+int     g_cpu_svi3   = 0;
 t_Rdmsr              g_rdmsr = NULL;
 t_ReadPciConfigDword  g_rdpci = NULL;
 t_WritePciConfigDword g_wrpci = NULL;
@@ -39,7 +42,7 @@ static int read_tjmax(void) {
   return (tj >= 60 && tj <= 120) ? tj : 100;
 }
 
-/* Detect CPU vendor and full family via CPUID. */
+/* Detect CPU vendor, full family and full model via CPUID. */
 static void detect_cpu(void) {
   int regs[4] = {0};
 
@@ -55,16 +58,50 @@ static void detect_cpu(void) {
   else if (strcmp(vendor, "AuthenticAMD") == 0) g_cpu_vendor = CPU_VENDOR_AMD;
   else                                          g_cpu_vendor = CPU_VENDOR_UNKNOWN;
 
-  /* Family from leaf 1, EAX */
+  /* Family / model from leaf 1, EAX */
   __cpuid(regs, 1);
-  int base_family = (regs[0] >> 8) & 0xF;
+  int base_family = (regs[0] >> 8)  & 0xF;
   int ext_family  = (regs[0] >> 20) & 0xFF;
+  int base_model  = (regs[0] >> 4)  & 0xF;
+  int ext_model   = (regs[0] >> 16) & 0xF;
   g_cpu_family = (base_family == 0xF) ? (base_family + ext_family) : base_family;
+  g_cpu_model  = (base_family == 0x6 || base_family == 0xF)
+                   ? (base_model | (ext_model << 4)) : base_model;
 
-  printf("[wr0] CPU vendor=%s family=0x%X\n", vendor, g_cpu_family);
+  /* AMD Zen4 / Zen5 (and newer) encode the core VID with SVI3 */
+  g_cpu_svi3 = 0;
+  if (g_cpu_vendor == CPU_VENDOR_AMD) {
+    if (g_cpu_family >= 0x1A)
+      g_cpu_svi3 = 1;
+    else if (g_cpu_family == 0x19 &&
+             ((g_cpu_model >= 0x10 && g_cpu_model <= 0x1F) ||   /* Genoa / Storm Peak */
+              (g_cpu_model >= 0x60 && g_cpu_model <= 0x7F) ||   /* Raphael / Phoenix  */
+              (g_cpu_model >= 0xA0 && g_cpu_model <= 0xAF)))    /* Bergamo / Siena    */
+      g_cpu_svi3 = 1;
+  }
+
+  printf("[wr0] CPU vendor=%s family=0x%X model=0x%X svi3=%d\n",
+         vendor, g_cpu_family, g_cpu_model, g_cpu_svi3);
 }
 
 /* ── Lifecycle ───────────────────────────────────────────────────────────── */
+
+/* Unload the DLL and forget every export pointer. Used on every failure
+   path of cpu_wr0_init() and on shutdown, so no pointer into an unloaded
+   module is ever called later (e.g. g_deinit() from cpu_wr0_shutdown()). */
+static void wr0_unload(int call_deinit) {
+  if (call_deinit && g_deinit) g_deinit();
+  if (g_dll) { FreeLibrary(g_dll); g_dll = NULL; }
+  g_init   = NULL;
+  g_deinit = NULL;
+  g_rdmsr  = NULL;
+  g_rdpci  = NULL;
+  g_wrpci  = NULL;
+  g_rdmem  = NULL;
+  g_rdio   = NULL;
+  g_wrio   = NULL;
+  g_ready  = 0;
+}
 
 void cpu_wr0_init(void) {
   if (g_ready) return;
@@ -82,19 +119,19 @@ void cpu_wr0_init(void) {
 
   if (!g_init || !g_deinit || !g_rdmsr || !is_msr) {
     printf("[wr0] Missing exports in WinRing0x64.dll\n");
-    FreeLibrary(g_dll); g_dll = NULL;
+    wr0_unload(0);
     return;
   }
 
   if (!g_init()) {
     printf("[wr0] InitializeOls() failed — driver not loaded or not admin\n");
-    FreeLibrary(g_dll); g_dll = NULL;
+    wr0_unload(0);
     return;
   }
 
   if (!is_msr()) {
     printf("[wr0] IsMsr() returned false — MSR not supported\n");
-    g_deinit(); FreeLibrary(g_dll); g_dll = NULL;
+    wr0_unload(1);
     return;
   }
 
@@ -118,13 +155,6 @@ void cpu_wr0_init(void) {
 }
 
 void cpu_wr0_shutdown(void) {
-  if (g_deinit) g_deinit();
-  if (g_dll) { FreeLibrary(g_dll); g_dll = NULL; }
-  g_init   = NULL;
-  g_deinit = NULL;
-  g_rdmsr  = NULL;
-  g_rdpci  = NULL;
-  g_wrpci  = NULL;
-  g_rdmem  = NULL;
-  g_ready  = 0;
+  /* DeinitializeOls only if InitializeOls succeeded (g_ready) */
+  wr0_unload(g_ready);
 }

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(SpecsViewer VERSION 2.1.0 LANGUAGES C)
+project(SpecsViewer VERSION 2.2.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -57,12 +57,6 @@ add_custom_command(TARGET specsviewer POST_BUILD
 
 add_custom_command(TARGET specsviewer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_SOURCE_DIR}/resources/db"
-    "$<TARGET_FILE_DIR:specsviewer>/resources/db"
-)
-
-add_custom_command(TARGET specsviewer POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_SOURCE_DIR}/resources/jsons"
     "$<TARGET_FILE_DIR:specsviewer>/resources/jsons"
 )
@@ -104,14 +98,11 @@ target_link_libraries(specsviewer PRIVATE
     oleaut32
     wbemuuid
     setupapi
-    setupapi
     advapi32
     bcrypt
-    version
-    cfgmgr32
-    wintrust
-    crypt32
     powrprof
+    pdh
+    wevtapi
     winhttp
     windowscodecs
     comdlg32

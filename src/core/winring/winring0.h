@@ -31,10 +31,17 @@ extern t_WriteIoPortByte     g_wrio;   /* WriteIoPortByte pointer           */
 
 extern int g_cpu_vendor;  /* CPU_VENDOR_*                                   */
 extern int g_cpu_family;  /* full CPUID family (e.g. 0x17 for Zen)         */
+extern int g_cpu_model;   /* full CPUID model  (ext_model << 4 | model)    */
+extern int g_cpu_svi3;    /* AMD: 1 if core VID uses SVI3 encoding (Zen4+) */
 
 /* ── Intel MSR indices ──────────────────────────────────────────────────── */
 #define MSR_TEMPERATURE_TARGET 0x000001A2u  /* bits [23:16] = TjMax          */
 #define MSR_THERM_STATUS       0x0000019Cu  /* bit 31 = valid, bits [22:16]  */
+#define MSR_PERF_STATUS        0x00000198u  /* bits [47:32] = core VID, 1/8192 V */
+
+/* ── AMD MSR indices ────────────────────────────────────────────────────── */
+#define MSR_AMD_PSTATE_STATUS  0xC0010063u  /* bits [2:0] = current P-state  */
+#define MSR_AMD_PSTATE_0       0xC0010064u  /* P-state 0 definition, +N → P-N */
 
 /* ── AMD PCI / SMN defines ──────────────────────────────────────────────── */
 /* Family 15h/16h: thermtrip register in PCI config space of node 0          */
@@ -58,5 +65,6 @@ int wr0_rdmsr64(DWORD msr, uint64_t *out);
 void cpu_wr0_init(void);
 void cpu_wr0_shutdown(void);
 
-/* ── CPU temperature via MSR/PCI (implemented in cpu/cpu_winring0.c) ──────── */
-int cpu_wr0_read_temp(void);
+/* ── CPU sensors via MSR/PCI (implemented in cpu/cpu_winring0.c) ─────────── */
+int    cpu_wr0_read_temp(void);     /* °C, -1 if unavailable                 */
+double cpu_wr0_read_voltage(void);  /* core VID in volts, 0.0 if unavailable */

@@ -249,7 +249,8 @@ typedef struct RawSMBIOSData {
 #pragma pack(pop)
 
 static DWORD fourcc(char a, char b, char c, char d) {
-    return ((DWORD)(uint8_t)a) | ((DWORD)(uint8_t)b << 8) | ((DWORD)(uint8_t)c << 16) | ((DWORD)(uint8_t)d << 24);
+    /* multi-char constant order, e.g. 'RSMB' == 0x52534D42 (matches mboard_info.c) */
+    return ((DWORD)(uint8_t)a << 24) | ((DWORD)(uint8_t)b << 16) | ((DWORD)(uint8_t)c << 8) | ((DWORD)(uint8_t)d);
 }
 
 int get_ram_channel_count_smbios(void)
@@ -410,4 +411,63 @@ char *get_ram_manufacturer(void)
 {
     ensure_ram_cache();
     return g_ram_manufacturer;
+}
+
+/* ── SMBIOS Type 17: DRAM voltage ───────────────────────────────────────── */
+/* SMBIOS 2.8+ Memory Device fields (mV, 0 = unknown):
+     0x22 MinimumVoltage, 0x24 MaximumVoltage, 0x26 ConfiguredVoltage.
+   "Configured" is the voltage the firmware programmed for the module; on
+   boards that fill it in, it reflects the BIOS / XMP setting.
+   Values come from the first populated slot (all channels normally run at
+   the same voltage). Returns 1 when a configured voltage was found.        */
+int get_ram_voltage_smbios_mv(int *configured_mv, int *min_mv, int *max_mv)
+{
+    if (configured_mv) *configured_mv = 0;
+    if (min_mv)        *min_mv = 0;
+    if (max_mv)        *max_mv = 0;
+
+    DWORD sig = fourcc('R','S','M','B');
+    DWORD sz  = GetSystemFirmwareTable(sig, 0, NULL, 0);
+    if (sz <= 8) return 0;
+
+    uint8_t *buf = (uint8_t *)malloc(sz);
+    if (!buf) return 0;
+    if (GetSystemFirmwareTable(sig, 0, buf, sz) != sz) { free(buf); return 0; }
+
+    RawSMBIOSData *rs = (RawSMBIOSData *)buf;
+    if (rs->Length > sz - 8) rs->Length = sz - 8;
+
+    uint8_t *p   = rs->SMBIOSTableData;
+    uint8_t *end = rs->SMBIOSTableData + rs->Length;
+    int found = 0;
+
+    while (p + 4 <= end) {
+        uint8_t type = p[0];
+        uint8_t len  = p[1];
+        if (len < 4 || p + len > end) break;
+        if (type == 127) break;
+
+        if (type == 17 && len >= 0x28) {
+            uint16_t size = (uint16_t)p[0x0C] | ((uint16_t)p[0x0D] << 8);
+            if (size != 0) {   /* populated slot */
+                int mn  = (int)((uint16_t)p[0x22] | ((uint16_t)p[0x23] << 8));
+                int mx  = (int)((uint16_t)p[0x24] | ((uint16_t)p[0x25] << 8));
+                int cfg = (int)((uint16_t)p[0x26] | ((uint16_t)p[0x27] << 8));
+                if (cfg > 0 || mn > 0 || mx > 0) {
+                    if (configured_mv) *configured_mv = cfg;
+                    if (min_mv)        *min_mv = mn;
+                    if (max_mv)        *max_mv = mx;
+                    found = (cfg > 0);
+                    break;
+                }
+            }
+        }
+
+        uint8_t *q = p + len;
+        while (q + 1 < end && !(q[0] == 0 && q[1] == 0)) q++;
+        p = q + 2;
+    }
+
+    free(buf);
+    return found;
 }

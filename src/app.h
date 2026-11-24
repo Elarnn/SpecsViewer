@@ -8,6 +8,7 @@
 #include <windows.h>
 #include "update/updater_check.h"
 #include "net/bench_sync.h"
+#include "bench/stability.h"
 #include "ui/overlay/overlay.h"
 
 
@@ -27,26 +28,28 @@ struct AppState {
 
   BenchState bench;
 
-  // ====== Результаты Security Scan (что рисует UI) ======
-  Snapshot drv_snap;
-  int drv_ready; // 1 когда ВСЕ результаты скана готовы
-  int drv_win_open;
+  // ====== CPU stability test ======
+  StabilityState stab;
+  int     stab_test_sel;      /* enum StabTest */
+  int     stab_dur_sel;       /* index into the duration presets */
+  int     stab_custom_min;    /* "Custom" duration in minutes */
+  char    stab_custom_buf[8]; /* edit buffer of the custom duration */
+  nk_bool stab_stop_on_error;
+
+  // ====== Результаты Security Scan (аппаратные механизмы защиты) ======
+  Snapshot sec_snap; // data.sec заполнен сканом
+  int sec_ready;     // 1 когда результаты скана готовы
   int fp_win_open;
   int usermode_warn_open;
   int usermode_warn_dont_ask; /* 1 = suppress on future launches (saved to config) */
   char fp_text[65536];
-
-  uint32_t drv_risk_flags[DRV_MAX];
-  int risk_count_loldrivers;
-  int risk_count_msblock;
-  int risk_count_unsigned;
 
   // ====== 3-й поток: Security Scan worker ======
   HANDLE scan_thread;
   HANDLE scan_stop_event;      // на будущее для отмены
   volatile LONG scan_state;    // SCAN_*
   volatile LONG scan_progress; // 0..1000 (проценты*10)
-  CRITICAL_SECTION scan_cs;    // защита drv_snap + risk_* + hw + score
+  CRITICAL_SECTION scan_cs;    // защита sec_snap / sec_ready
 
   char title[64];
 
@@ -87,6 +90,13 @@ struct AppState {
   // ====== HW Overlay ======
   OverlayState overlay;
   int overlay_enabled;
+
+  // ====== Device selection (multi CPU / GPU) ======
+  int   devsel_open;           /* DEVSEL_NONE / DEVSEL_CPU / DEVSEL_GPU — dropdown open */
+  float devsel_anim;           /* 0.0 closed → 1.0 fully open                            */
+  struct nk_rect devsel_anchor;/* bounds of the clicked device name (dropdown anchor)    */
+  int   pref_cpu_sel;          /* active CPU index, persisted in config                  */
+  int   pref_gpu_sel;          /* active GPU index, persisted in config                  */
 };
 
 int app_init(struct AppState *S, int w, int h, const char *title);

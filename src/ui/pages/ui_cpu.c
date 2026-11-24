@@ -4,9 +4,11 @@
 #include "ui/nk_common.h"
 
 
-void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
+void ui_page_cpu(struct nk_context *ctx, struct AppState *S) {
   char buf[128];
   struct nk_color vc = theme_get_value_color((AppTheme)S->active_theme);
+  const DeviceList *dl = &S->snap.data.devices;
+  const int multi_cpu = dl->cpu_count > 1;
 
   struct nk_rect content = nk_window_get_content_region(ctx);
 
@@ -27,8 +29,11 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
     nk_layout_row_template_end(ctx);
 
     nk_label(ctx, "CPU Model:", NK_TEXT_RIGHT);
-    nk_label_val(ctx, S->snap.data.cpu.model[0] ? S->snap.data.cpu.model : "-",
-                 NK_TEXT_CENTERED, vc);
+    if (multi_cpu) /* clickable name + arrow: opens the processor dropdown */
+      ui_device_name_dropdown(ctx, S, DEVSEL_CPU, S->snap.data.cpu.model, vc);
+    else
+      nk_label_val(ctx, S->snap.data.cpu.model[0] ? S->snap.data.cpu.model : "-",
+                   NK_TEXT_CENTERED, vc);
 
     nk_layout_row_template_begin(ctx, 26);
     nk_layout_row_template_push_static(ctx, 140);
@@ -48,11 +53,21 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
     nk_layout_row_template_begin(ctx, 26);
     nk_layout_row_template_push_static(ctx, 140);
     nk_layout_row_template_push_static(ctx, 100);
-    nk_layout_row_template_push_dynamic(ctx); // пока пусто
+    nk_layout_row_template_push_static(ctx, 130); // current frequency label
+    nk_layout_row_template_push_static(ctx, 100);
+    nk_layout_row_template_push_dynamic(ctx);
     nk_layout_row_template_end(ctx);
 
     nk_label(ctx, "Base frequency:", NK_TEXT_RIGHT);
     snprintf(buf, sizeof(buf), "%d MHz", S->snap.data.cpu.base_mhz);
+    nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
+
+    /* effective current frequency (Task Manager style: base x %performance) */
+    nk_label(ctx, "Current freq:", NK_TEXT_RIGHT);
+    if (S->snap.cpu_rt.cur_mhz > 0)
+      snprintf(buf, sizeof(buf), "%d MHz", S->snap.cpu_rt.cur_mhz);
+    else
+      snprintf(buf, sizeof(buf), "N/A");
     nk_label_val(ctx, buf, NK_TEXT_CENTERED, vc);
 
     nk_spacer(ctx);
@@ -174,6 +189,17 @@ void ui_page_cpu(struct nk_context *ctx, const struct AppState *S) {
 
     nk_label(ctx, buf, NK_TEXT_CENTERED);
 
+    nk_spacer(ctx); /* third column — empty */
+
+    /* Core VID — voltage requested by the CPU, follows the BIOS Vcore setting */
+    nk_label(ctx, "Core VID:", NK_TEXT_RIGHT);
+
+    if (S->snap.cpu_rt.voltage > 0.0)
+      snprintf(buf, sizeof(buf), "%.3f V", S->snap.cpu_rt.voltage);
+    else
+      snprintf(buf, sizeof(buf), "N/A");
+
+    nk_label(ctx, buf, NK_TEXT_CENTERED);
     nk_spacer(ctx); /* third column — empty */
 
     nk_group_end(ctx);

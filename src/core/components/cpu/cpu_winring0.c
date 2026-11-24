@@ -1,16 +1,25 @@
 // cpu_winring0.c
-// CPU temperature reading via WinRing0 MSR / PCI config access.
+// CPU temperature and core voltage (VID) via WinRing0 MSR / PCI config access.
 //
-// Intel Nehalem+ (Core i-series, 2008+):
-//   - TjMax from IA32_TEMPERATURE_TARGET (0x1A2) bits [23:16]
-//   - Core 0 temp from IA32_THERM_STATUS  (0x19C) bits [22:16], bit 31 = valid
+// Temperature
+//   Intel Nehalem+ (Core i-series, 2008+):
+//     - TjMax from IA32_TEMPERATURE_TARGET (0x1A2) bits [23:16]
+//     - Core temp from IA32_THERM_STATUS   (0x19C) bits [22:16], bit 31 = valid
+//   AMD Family 15h/16h (Bulldozer–Carrizo, ~2012–2016):
+//     - D18F3xA4 PCI config register, CurTmp bits [31:21], unit 0.125 °C
+//   AMD Family 17h+ (Zen / Ryzen, 2017+):
+//     - Tctl via SMN register 0x00059800, accessed through PCI host-bridge
+//     - Bits [31:21], unit 0.125 °C; bit 19-18 == 3 → subtract 49 °C offset
 //
-// AMD Family 15h/16h (Bulldozer–Carrizo, ~2012–2016):
-//   - D18F3xA4 PCI config register, CurTmp bits [31:21], unit 0.125 °C
-//
-// AMD Family 17h+ (Zen / Ryzen, 2017+):
-//   - Tctl via SMN register 0x00059800, accessed through PCI host-bridge
-//   - Bits [31:21], unit 0.125 °C; bit 19-18 == 3 → subtract 49 °C offset
+// Core voltage (VID — the voltage the CPU requests from the VRM; this is the
+// value CPU-Z / HWiNFO report as "Core VID" and tracks the BIOS Vcore setting)
+//   Intel Sandy Bridge+:
+//     - IA32_PERF_STATUS (0x198) bits [47:32], unit 1/8192 V
+//   AMD Family 17h+ (Zen):
+//     - current P-state from MSR 0xC0010063 bits [2:0]
+//     - CpuVid from P-state MSR 0xC0010064+P bits [21:14]
+//       SVI2 (Zen–Zen3): V = 1.55  − VID × 0.00625
+//       SVI3 (Zen4+):    V = 0.245 + VID × 0.005
 
 #include "../../winring/winring0.h"
 
@@ -27,6 +36,19 @@ static int intel_read_temp(void) {
   int distance = (int)((v >> 16) & 0x7F);
   int temp = g_tjmax - distance;
   return (temp >= 0 && temp <= 125) ? temp : -1;
+}
+
+static double intel_read_vid(void) {
+  uint64_t v = 0;
+  if (!wr0_rdmsr64(MSR_PERF_STATUS, &v))
+    return 0.0;
+
+  unsigned raw = (unsigned)((v >> 32) & 0xFFFFu);
+  if (!raw)
+    return 0.0;
+
+  double volts = (double)raw / 8192.0;
+  return (volts > 0.3 && volts < 2.0) ? volts : 0.0;
 }
 
 /* ── AMD Family 15h/16h path (PCI config D18F3xA4) ─────────────────────── */
@@ -70,7 +92,25 @@ static int amd_zen_read_temp(void) {
   return (temp >= 0 && temp <= 150) ? temp : -1;
 }
 
-/* ── Public entry point ─────────────────────────────────────────────────── */
+static double amd_zen_read_vid(void) {
+  uint64_t st = 0;
+  if (!wr0_rdmsr64(MSR_AMD_PSTATE_STATUS, &st))
+    return 0.0;
+  unsigned p = (unsigned)(st & 0x7u);
+
+  uint64_t ps = 0;
+  if (!wr0_rdmsr64(MSR_AMD_PSTATE_0 + p, &ps))
+    return 0.0;
+  if (!((ps >> 63) & 1u))   /* PstateEn */
+    return 0.0;
+
+  unsigned vid  = (unsigned)((ps >> 14) & 0xFFu);
+  double volts  = g_cpu_svi3 ? (0.245 + 0.005   * (double)vid)
+                             : (1.55  - 0.00625 * (double)vid);
+  return (volts > 0.3 && volts < 2.0) ? volts : 0.0;
+}
+
+/* ── Public entry points ────────────────────────────────────────────────── */
 
 int cpu_wr0_read_temp(void) {
   if (!g_ready) return -1;
@@ -88,5 +128,25 @@ int cpu_wr0_read_temp(void) {
 
     default:
       return -1;
+  }
+}
+
+double cpu_wr0_read_voltage(void) {
+  if (!g_ready) return 0.0;
+
+  switch (g_cpu_vendor) {
+    case CPU_VENDOR_INTEL:
+      /* Family 6, Sandy Bridge (model 0x2A) and newer */
+      if (g_cpu_family == 0x06 && g_cpu_model >= 0x2A)
+        return intel_read_vid();
+      return 0.0;
+
+    case CPU_VENDOR_AMD:
+      if (g_cpu_family >= 0x17)        /* Zen and newer */
+        return amd_zen_read_vid();
+      return 0.0;
+
+    default:
+      return 0.0;
   }
 }

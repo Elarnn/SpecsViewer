@@ -47,8 +47,7 @@ int app_init(struct AppState *S, int w, int h, const char *title) {
     S->scan_stop_event = CreateEventA(NULL, TRUE, FALSE, NULL);
     S->scan_state      = SCAN_IDLE;
     S->scan_progress   = 0;
-    S->drv_ready       = 0;
-    S->drv_win_open    = 0;
+    S->sec_ready       = 0;
     S->fp_win_open     = 0;
     S->fp_text[0]      = '\0';
 
@@ -58,17 +57,29 @@ int app_init(struct AppState *S, int w, int h, const char *title) {
     S->updater_asked   = 0;
     S->update_dont_ask = 0;
 
+    S->devsel_open  = DEVSEL_NONE;
+    S->devsel_anim  = 0.0f;
+    S->devsel_anchor = nk_rect(0, 0, 0, 0);
+    S->pref_cpu_sel = 0;
+    S->pref_gpu_sel = 0;
+
+    /* stability test settings (config_load may override them) */
+    S->stab_test_sel      = 0;
+    S->stab_dur_sel       = 1;
+    S->stab_custom_min    = 60;
+    S->stab_stop_on_error = 1;
+
     /* Nuklear: init, fonts, default theme */
     nk_setup_init(S);
     config_load(S); /* override theme and dont_ask from saved config */
-
     bench_init(&S->bench);
+    stab_init(&S->stab);
     bench_sync_init(&S->bench_sync);
     S->overlay_enabled = 0;
     overlay_init(&S->overlay, S->window);
 
     /* Backend + updater */
-    if (!backend_start(&S->backend))
+    if (!backend_start(&S->backend, S->pref_cpu_sel, S->pref_gpu_sel))
         FAIL("backend_start failed");
 
     update_check_start(&S->updater);
@@ -125,6 +136,7 @@ void app_shutdown(struct AppState *S) {
     update_cleanup(&S->updater);
     overlay_shutdown(&S->overlay);
     bench_sync_shutdown(&S->bench_sync);
+    stab_shutdown(&S->stab);
     bench_shutdown(&S->bench);
     backend_stop(&S->backend);
 

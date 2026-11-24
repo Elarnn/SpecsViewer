@@ -8,8 +8,9 @@
 
 #define RT_GRAPH_HISTORY_COUNT 120
 #define RT_GRAPH_UPDATE_INTERVAL 0.5f
-#define CPU_GROUP_HEIGHT 370
+#define CPU_GROUP_HEIGHT 410
 #define GPU_GROUP_HEIGHT 410
+#define GPU_BASIC_GROUP_HEIGHT 90
 #define RAM_GROUP_HEIGHT 210
 
 // --- forward declarations ---
@@ -138,13 +139,38 @@ void ui_page_sensors(struct nk_context *ctx, struct AppState *S) {
 
       ui_space(ctx);
 
+      // --- Core VID row ---
+      nk_layout_row_template_begin(ctx, 26);
+      nk_layout_row_template_push_static(ctx, 140);
+      nk_layout_row_template_push_dynamic(ctx);
+      nk_layout_row_template_end(ctx);
+
+      nk_label(ctx, "Core VID:", NK_TEXT_RIGHT);
+      if (S->snap.cpu_rt.voltage > 0.0)
+        snprintf(buf, sizeof(buf), "%.3f V", S->snap.cpu_rt.voltage);
+      else
+        snprintf(buf, sizeof(buf), "N/A");
+      nk_label(ctx, buf, NK_TEXT_CENTERED);
+
       nk_group_end(ctx);
     }
 
     // ------------------------------------------------------------------ GPU --
-    nk_layout_row_dynamic(ctx, GPU_GROUP_HEIGHT, 1);
+    const int gpu_sensors = S->snap.data.gpu.is_nvidia;
+    nk_layout_row_dynamic(ctx, gpu_sensors ? GPU_GROUP_HEIGHT : GPU_BASIC_GROUP_HEIGHT, 1);
     if (nk_group_begin(ctx, "Graphics card",
                        NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_TITLE)) {
+
+      if (!gpu_sensors) {
+        ui_space(ctx);
+        nk_layout_row_dynamic(ctx, 26, 1);
+        nk_label(ctx,
+                 S->snap.data.devices.gpu_count > 0
+                     ? "Sensor data is available only for NVIDIA GPUs"
+                     : "No graphics adapter detected",
+                 NK_TEXT_CENTERED);
+        nk_group_end(ctx);
+      } else {
 
       ui_space(ctx);
 
@@ -203,6 +229,7 @@ void ui_page_sensors(struct nk_context *ctx, struct AppState *S) {
       nk_label(ctx, buf, NK_TEXT_CENTERED);
 
       nk_group_end(ctx);
+      }
     }
 
     // ------------------------------------------------------------------ RAM --

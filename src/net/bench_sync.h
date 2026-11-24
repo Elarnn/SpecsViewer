@@ -21,10 +21,15 @@ typedef struct {
 void bench_sync_init(BenchSyncState *bs);
 void bench_sync_shutdown(BenchSyncState *bs);
 
-/* POST /submit in a background thread. */
+/* Benchmark kernel version sent as "bench_version"; the server only accepts
+   results of the kernel it was deployed for (points, since 2.2). */
+#define BENCH_KERNEL_VERSION 2
+
+/* POST /submit in a background thread. Sends the composite scores plus the
+   per-sub-test points of both runs. */
 void bench_sync_submit(BenchSyncState *bs, const char *cpu_name,
-                       double single_throughput, double multi_throughput,
-                       int threads);
+                       const BenchTestResult *single,
+                       const BenchTestResult *multi, int threads);
 
 /* GET /refs, parse in-memory, signal refs_ready. Fire-and-forget at startup. */
 void bench_sync_fetch_refs(BenchSyncState *bs);

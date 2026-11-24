@@ -202,10 +202,25 @@ static int pow_solve(const char *token, int bits, char nonce_out[17]) {
 typedef struct {
     BenchSyncState *bs;
     char  cpu_name[256];
-    double single_throughput;
-    double multi_throughput;
+    BenchTestResult single;
+    BenchTestResult multi;
     int   threads;
 } SubmitCtx;
+
+/* "[1.0,2.0,...]" from the per-sub-test points; empty string if not available */
+static void sub_scores_json(const BenchTestResult *r, char *out, size_t out_sz) {
+    out[0] = '\0';
+    if (!r || r->sub_done < BENCH_SUBTESTS) return;
+    size_t pos = 0;
+    for (int i = 0; i < BENCH_SUBTESTS; i++) {
+        int n = snprintf(out + pos, out_sz - pos, "%s%.1f", i ? "," : "[", r->sub_pts[i]);
+        if (n < 0 || (size_t)n >= out_sz - pos) { out[0] = '\0'; return; }
+        pos += (size_t)n;
+    }
+    if (pos + 2 > out_sz) { out[0] = '\0'; return; }
+    out[pos++] = ']';
+    out[pos]   = '\0';
+}
 
 static DWORD WINAPI submit_worker(LPVOID param) {
     SubmitCtx *ctx = (SubmitCtx *)param;
@@ -233,22 +248,34 @@ static DWORD WINAPI submit_worker(LPVOID param) {
     char safe_cpu[512];
     json_escape(ctx->cpu_name, safe_cpu, sizeof(safe_cpu));
 
+    char single_sub[160], multi_sub[160];
+    sub_scores_json(&ctx->single, single_sub, sizeof(single_sub));
+    sub_scores_json(&ctx->multi,  multi_sub,  sizeof(multi_sub));
+
     char body[2048];
-    snprintf(body, sizeof(body),
+    int blen_w = snprintf(body, sizeof(body),
         "{\"cpu_name\":\"%s\","
-         "\"single_throughput\":%.2f,"
-         "\"multi_throughput\":%.2f,"
+         "\"bench_version\":%d,"
+         "\"single_throughput\":%.1f,"
+         "\"multi_throughput\":%.1f,"
          "\"threads\":%d,"
-         "\"app_version\":\"%s\","
-         "\"challenge\":\"%s\","
-         "\"nonce\":\"%s\"}",
+         "\"app_version\":\"%s\",",
         safe_cpu,
-        ctx->single_throughput,
-        ctx->multi_throughput,
+        BENCH_KERNEL_VERSION,
+        ctx->single.throughput,
+        ctx->multi.throughput,
         ctx->threads,
-        SPECSVIEWER_VERSION,
-        token,
-        nonce);
+        SPECSVIEWER_VERSION);
+    if (blen_w > 0 && (size_t)blen_w < sizeof(body)) {
+        size_t pos = (size_t)blen_w;
+        if (single_sub[0] && multi_sub[0]) {
+            int n = snprintf(body + pos, sizeof(body) - pos,
+                             "\"single_sub\":%s,\"multi_sub\":%s,", single_sub, multi_sub);
+            if (n > 0 && (size_t)n < sizeof(body) - pos) pos += (size_t)n;
+        }
+        snprintf(body + pos, sizeof(body) - pos,
+                 "\"challenge\":\"%s\",\"nonce\":\"%s\"}", token, nonce);
+    }
 
     int status = http_post_json(BENCH_SERVER_HOST, L"/submit", body);
     InterlockedExchange(&ctx->bs->submit_status,
@@ -259,8 +286,8 @@ static DWORD WINAPI submit_worker(LPVOID param) {
 }
 
 void bench_sync_submit(BenchSyncState *bs, const char *cpu_name,
-                       double single_throughput, double multi_throughput,
-                       int threads) {
+                       const BenchTestResult *single,
+                       const BenchTestResult *multi, int threads) {
     if (bs->submit_thread) {
         if (WaitForSingleObject(bs->submit_thread, 0) == WAIT_TIMEOUT)
             return; /* already in flight */
@@ -271,10 +298,10 @@ void bench_sync_submit(BenchSyncState *bs, const char *cpu_name,
     SubmitCtx *ctx = (SubmitCtx *)calloc(1, sizeof(SubmitCtx));
     if (!ctx) { InterlockedExchange(&bs->submit_status, (LONG)BENCH_SUBMIT_ERROR); return; }
 
-    ctx->bs               = bs;
-    ctx->single_throughput = single_throughput;
-    ctx->multi_throughput  = multi_throughput;
-    ctx->threads           = threads;
+    ctx->bs      = bs;
+    if (single) ctx->single = *single;
+    if (multi)  ctx->multi  = *multi;
+    ctx->threads = threads;
     strncpy(ctx->cpu_name, cpu_name ? cpu_name : "Unknown", sizeof(ctx->cpu_name) - 1);
 
     InterlockedExchange(&bs->submit_status, (LONG)BENCH_SUBMIT_PENDING);

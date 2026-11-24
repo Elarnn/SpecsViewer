@@ -16,7 +16,8 @@ void ui_frame(struct AppState *S) {
                   (float)wh), // ctx: контекст; "Root": ID окна; nk_rect(...):
                               // позиция/размер; flags: поведение окна
           NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_BACKGROUND)) {
-    if (!S->drv_win_open && !S->fp_win_open && !S->usermode_warn_open
+    if (!S->fp_win_open && !S->usermode_warn_open
+        && !S->devsel_open && S->devsel_anim < 0.01f
         && S->theme_panel_anim < 0.01f)
       nk_window_set_focus(ctx, "Root");
 
@@ -64,9 +65,13 @@ void ui_frame(struct AppState *S) {
   }
   nk_end(ctx); // завершить окно "Root"
 
-  ui_window_drivers(ctx, S, ww, wh);
   ui_window_hardware_fingerprint(ctx, S, ww, wh);
   ui_window_usermode_warn(ctx, S, ww, wh);
+
+  /* CPU / GPU dropdown — drawn above the page it unfolds from */
+  ui_window_device_select(ctx, S, ww, wh);
+  if (S->devsel_anim > 0.0f)
+    nk_window_set_focus(ctx, "DeviceSelect");
 
   /* ThemePanel идёт последним — Nuklear рендерит последнее окно поверх всех */
   ui_theme_panel(ctx, S, ww, wh);

@@ -191,7 +191,8 @@ void overlay_frame(OverlayState *o, const Snapshot *snap, struct GLFWwindow *mai
     while (PeekMessageA(&msg, o->hwnd, 0, 0, PM_REMOVE))
         DispatchMessageA(&msg);
 
-    int has_gpu = snap->data.gpu.name[0] != '\0';
+    /* only NVAPI-backed adapters provide runtime load / temperature */
+    int has_gpu = snap->data.gpu.is_nvidia && snap->data.gpu.name[0] != '\0';
     int n_rows  = 2 + (has_gpu ? 1 : 0);
     int n_graphs = n_rows;
 

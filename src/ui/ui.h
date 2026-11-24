@@ -28,6 +28,11 @@ enum AppTab {
   TAB_ABOUT
 };
 
+/* Device-selection popup state (AppState.devsel_open) */
+#define DEVSEL_NONE 0
+#define DEVSEL_CPU  1
+#define DEVSEL_GPU  2
+
 struct AppState; // из app.h
 
 /* top-level контейнер кадра */
@@ -47,27 +52,39 @@ void ui_theme_panel(struct nk_context *ctx, struct AppState *S, int ww, int wh);
 void ui_topbar(struct nk_context *ctx, enum AppTab *active);
 
 /* страницы */
-void ui_page_cpu(struct nk_context *ctx, const struct AppState *S);
+void ui_page_cpu(struct nk_context *ctx, struct AppState *S);
 void ui_page_ram(struct nk_context *ctx, const struct AppState *S);
-void ui_page_gpu(struct nk_context *ctx, const struct AppState *S);
+void ui_page_gpu(struct nk_context *ctx, struct AppState *S);
 void ui_page_about(struct nk_context *ctx, struct AppState *S);
 void ui_page_secure(struct nk_context *ctx, const struct AppState *S);
 void ui_page_sensors(struct nk_context *ctx, struct AppState *S);
 void sensors_update_graphs(const struct AppState *S);
 void ui_page_bench(struct nk_context *ctx, const struct AppState *S);
-void ui_window_drivers(struct nk_context *ctx, struct AppState *S, int ww,
-                       int wh);
+/* "CPU stability test" group, drawn on the Bench page under the benchmark */
+void ui_stability_group(struct nk_context *ctx, struct AppState *S);
 void ui_window_hardware_fingerprint(struct nk_context *ctx, struct AppState *S, int ww,
                            int wh);
 void ui_window_usermode_warn(struct nk_context *ctx, struct AppState *S, int ww,
                              int wh);
-/* generic dropdown shutter */
+/* Device switching (several CPUs / GPUs):
+   ui_device_name_dropdown() draws the device name as a clickable field with a
+   dropdown arrow and toggles the list; ui_window_device_select() renders the
+   list itself under the name (call once per frame after the Root window). */
+void ui_device_name_dropdown(struct nk_context *ctx, struct AppState *S,
+                             int kind, const char *name, struct nk_color vc);
+void ui_window_device_select(struct nk_context *ctx, struct AppState *S, int ww,
+                             int wh);
+/* generic dropdown shutter: a panel that unfolds from (anchor_x, anchor_y).
+   A left click outside the panel closes it, except inside `exclude`
+   (the widget that toggles the panel — it handles its own click). */
 typedef struct { const char *label; int id; } UiShutterItem;
 
 int ui_shutter(struct nk_context   *ctx,
                const char          *panel_id,
                float                anchor_x,
+               float                anchor_y,
                float                panel_w,
+               struct nk_rect       exclude,
                int                 *open,
                float               *anim,
                double              *last_t,

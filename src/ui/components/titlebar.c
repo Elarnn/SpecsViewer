@@ -123,7 +123,7 @@ static const UiShutterItem k_themes[] = {
 };
 
 void ui_theme_panel(struct nk_context *ctx, struct AppState *S, int ww, int wh) {
-    (void)ww; (void)wh;
+    (void)wh;
     static double last_t = 0.0;
 
     /* anchor left edge of panel under the "Themes" button */
@@ -137,7 +137,11 @@ void ui_theme_panel(struct nk_context *ctx, struct AppState *S, int ww, int wh) 
     float spx      = ctx->style.window.spacing.x;
     float anchor_x = pdx + tw + spx + 8.0f + spx;
 
-    int sel = ui_shutter(ctx, "ThemePanel", anchor_x, THEME_PANEL_W,
+    /* clicks inside the titlebar are handled by the "Themes" toggle button */
+    struct nk_rect titlebar = nk_rect(0, 0, (float)ww, (float)TITLEBAR_H);
+
+    int sel = ui_shutter(ctx, "ThemePanel", anchor_x, (float)TITLEBAR_H,
+                         THEME_PANEL_W, titlebar,
                          &S->theme_panel_open, &S->theme_panel_anim, &last_t,
                          "Themes", k_themes,
                          (int)(sizeof(k_themes) / sizeof(k_themes[0])),
